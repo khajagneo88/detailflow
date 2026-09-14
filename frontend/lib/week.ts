@@ -1,0 +1,54 @@
+/** Small date-math helpers for the Planning page — kept separate from
+ * lib/status.ts's formatDate() since these are about picking/labelling a
+ * *week*, not formatting a single date. Mirrors the server's own week
+ * normalisation (app/services/weekly_plan_service.py::monday_of) so the
+ * displayed week always matches what a create call would actually save
+ * against. */
+
+function toISODate(d: Date): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+/** Monday of the week containing `isoDate` (or today, if omitted), as an
+ * ISO date string — matching the backend's Monday-based normalisation. */
+export function mondayOf(isoDate?: string): string {
+  const d = isoDate ? new Date(`${isoDate}T00:00:00`) : new Date();
+  const dayOfWeek = d.getDay(); // 0 = Sunday, 1 = Monday, ...
+  const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+  d.setDate(d.getDate() + diff);
+  return toISODate(d);
+}
+
+export function addWeeks(mondayIso: string, weeks: number): string {
+  const d = new Date(`${mondayIso}T00:00:00`);
+  d.setDate(d.getDate() + weeks * 7);
+  return toISODate(d);
+}
+
+/** True once a week is fully over — i.e. its Monday is before this week's
+ * Monday. Weeks are always Monday-aligned (mondayOf), so comparing the
+ * ISO date strings directly is a valid chronological comparison. Used to
+ * decide when the Planning page starts marking plan items green/red
+ * (§19) instead of leaving them neutral — nothing to judge yet for the
+ * current or a future week. */
+export function isPastWeek(mondayIso: string): boolean {
+  return mondayIso < mondayOf();
+}
+
+/** "Sep 7 – Sep 13, 2026" for the week starting on `mondayIso`. */
+export function formatWeekRange(mondayIso: string): string {
+  const start = new Date(`${mondayIso}T00:00:00`);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 6);
+
+  const startLabel = start.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const endLabel = end.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+  return `${startLabel} – ${endLabel}`;
+}

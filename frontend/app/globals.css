@@ -1,0 +1,62 @@
+@import "tailwindcss";
+
+/*
+ * Professional, restrained palette for an operational business tool —
+ * not a marketing site. Slate neutrals for structure, a single blue accent
+ * for primary actions/active state, and semantic colours reserved for
+ * status (never used decoratively). See docs/ARCHITECTURE.md for the
+ * product's "information dense without becoming cluttered" direction.
+ */
+:root {
+  --background: #f8fafc; /* slate-50 */
+  --foreground: #0f172a; /* slate-900 */
+
+  --surface: #ffffff;
+  --surface-muted: #f1f5f9; /* slate-100 */
+  --border: #e2e8f0; /* slate-200 */
+
+  --muted-foreground: #64748b; /* slate-500 */
+
+  --primary: #1d4ed8; /* blue-700 */
+  --primary-foreground: #ffffff;
+
+  --success: #15803d; /* green-700 */
+  --success-bg: #f0fdf4;
+  --warning: #b45309; /* amber-700 */
+  --warning-bg: #fffbeb;
+  --danger: #b91c1c; /* red-700 */
+  --danger-bg: #fef2f2;
+  --info: #0369a1; /* sky-700 */
+  --info-bg: #f0f9ff;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-border: var(--border);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-success: var(--success);
+  --color-success-bg: var(--success-bg);
+  --color-warning: var(--warning);
+  --color-warning-bg: var(--warning-bg);
+  --color-danger: var(--danger);
+  --color-danger-bg: var(--danger-bg);
+  --color-info: var(--info);
+  --color-info-bg: var(--info-bg);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+* {
+  border-color: var(--border);
+}
