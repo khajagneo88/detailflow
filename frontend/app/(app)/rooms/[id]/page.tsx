@@ -198,20 +198,34 @@ function DetailerActionsCard({
   onTransitioned,
   onStatusChanged,
   onCommentPosted,
+  onTimeEntriesChanged,
 }: {
   room: Room;
   stages: WorkflowStage[];
   onTransitioned: (room: Room, event: RoomStageEvent) => void;
   onStatusChanged: (room: Room) => void;
   onCommentPosted: (comment: Comment) => void;
+  onTimeEntriesChanged: (entries: TimeEntry[]) => void;
 }) {
   const [onHoldOpen, setOnHoldOpen] = React.useState(false);
   const [onHoldType, setOnHoldType] = React.useState<CommentType>("rfi");
   const [onHoldBody, setOnHoldBody] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState<"start" | "hold" | "ready" | null>(null);
+  const { activeEntry, stop } = useTimeTracking();
 
   const readyTarget = getReadyForCheckTarget(room, stages);
+  // On Hold and Ready for Check both mean "I'm stepping away from this room
+  // right now" — stopping a timer still running on it here means the logged
+  // time always matches what was actually happening, without the detailer
+  // having to separately remember the Time card's own Stop button (§13.4/§20).
+  const isRunningHere = activeEntry?.room_id === room.id;
+
+  async function stopTimerIfRunningHere() {
+    if (!isRunningHere) return;
+    await stop();
+    onTimeEntriesChanged(await timeEntriesApi.listForRoom(room.id));
+  }
 
   async function handleStart() {
     setError(null);
@@ -231,6 +245,7 @@ function DetailerActionsCard({
     setError(null);
     setBusy("ready");
     try {
+      await stopTimerIfRunningHere();
       const event = await roomsApi.createStageTransition(room.id, {
         to_stage_key: readyTarget.key,
       });
@@ -249,6 +264,7 @@ function DetailerActionsCard({
     setError(null);
     setBusy("hold");
     try {
+      await stopTimerIfRunningHere();
       const comment = await commentsApi.create(room.project_id, {
         room_id: room.id,
         apartment_id: room.apartment_id,
@@ -297,7 +313,16 @@ function DetailerActionsCard({
             <AlertTriangle className="h-4 w-4" />
             On Hold — flag a problem
           </Button>
-        ) : (
+        ) : null}
+
+        {isRunningHere && (
+          <p className="text-xs text-muted-foreground">
+            Your timer is running on this room — it&apos;ll stop automatically when you use either
+            action above.
+          </p>
+        )}
+
+        {onHoldOpen && (
           <form onSubmit={handleOnHoldSubmit} className="flex flex-col gap-3 rounded-md border border-border p-3">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="on-hold-type">Type</Label>
@@ -1001,6 +1026,7 @@ export default function RoomDetailPage() {
               onCommentPosted={(comment) =>
                 setComments((prev) => (prev ? [comment, ...prev] : [comment]))
               }
+              onTimeEntriesChanged={setEntries}
             />
           ) : (
             <StageTransitionCard

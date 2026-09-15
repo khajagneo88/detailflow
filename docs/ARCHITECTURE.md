@@ -1,6 +1,6 @@
 # DetailFlow — Architecture & MVP Design
 
-Status: V1/MVP foundation, now through its fourth build stage plus six follow-up additions (admin section and the review/approval workflow in §11, detailer self-service/My Work/Reports in §12, time tracking in §13, the apartment/room creation UI in §14, the Team page's Workload tab in §15, weekly planning in §16, the Team page's presence dot in §17, paste-from-spreadsheet bulk room creation in §18, and past-week completed/not-completed marking on the Planning page in §19). This document is the reference for decisions made in this stage. Update it as the schema evolves — do not let it drift from the code.
+Status: V1/MVP foundation, now through its fourth build stage plus seven follow-up additions (admin section and the review/approval workflow in §11, detailer self-service/My Work/Reports in §12, time tracking in §13, the apartment/room creation UI in §14, the Team page's Workload tab in §15, weekly planning in §16, the Team page's presence dot in §17, paste-from-spreadsheet bulk room creation in §18, past-week completed/not-completed marking on the Planning page in §19, and linking the timer to On Hold/Ready for Check in §20). This document is the reference for decisions made in this stage. Update it as the schema evolves — do not let it drift from the code.
 
 ## 1. Product Interpretation
 
@@ -527,3 +527,21 @@ Like `weekly_plan_service.monday_of()` (§16.3), `week_start` is treated as a pl
 The chip's tooltip (`title`) does triple duty depending on the week: a future/current-week chip shows the plan's own note (unchanged from §16.5); a past green chip shows the actual hours logged that week plus the note ("Logged 2.0h that week · finishing kitchens"); a past red chip says plainly that nothing was logged. Nothing here is color-only, the same accessibility rule as the presence dot (§17.3) and the Gantt rework (§12.4).
 
 Removing or adding a plan entry for a past week still works exactly as it did before (§16.5) — this feature only changes how an existing chip is colored and labelled, not whether it can be edited.
+
+## 20. Linking the Timer to the Detailer Action Set
+
+A sixth follow-up request, but not a new feature on its own — a gap between two things that already existed. §12.1 gave detailers Start / On Hold / Ready for Check on the room detail page; §13 gave them an independent Start timer / Stop on the same page. Nothing connected the two: a detailer could put a room On Hold or mark it Ready for Check while their timer kept running on it, and the only way to close that time entry out was to separately remember the Time card's own Stop button.
+
+### 20.1 On Hold and Ready for Check now stop a timer running on that room, not just record the workflow change
+
+Asked directly rather than assumed, since this changes existing button behavior: should stopping the timer stay a fully separate, manual action, or should it ride along with On Hold / Ready for Check? The answer was to link them. `DetailerActionsCard` (`frontend/app/(app)/rooms/[id]/page.tsx`) now reads `activeEntry` from the same `TimeTrackingContext` the Time card already uses (§13.4), and both `handleOnHoldSubmit()` and `handleReadyForCheck()` call a shared `stopTimerIfRunningHere()` first — a no-op if nothing is running on this room, otherwise `TimeTrackingContext.stop()` followed by a re-fetch of the room's time-entry list so the Time card's total and history update in the same round trip rather than going stale until the next poll.
+
+This is entirely a frontend change — no new endpoint, no schema change. The existing `stop()` call already knew how to close out whichever entry is currently active; the only new logic is *when* it fires. `activeEntry` is shared context state, so the header's running-timer chip, the Time card, and this new auto-stop all agree about what's running without any of them polling each other directly.
+
+### 20.2 Why silently, not with a confirmation dialog
+
+The obvious alternative — "Are you sure? This will also stop your timer" — was rejected the same way §16.2 rejected pausing on the plan/assignment link: a confirmation dialog on an action a detailer already chose to take (they clicked On Hold or Ready for Check on purpose) just adds a click without adding a real decision point. Instead, a one-line note appears in the "Your actions" card whenever a timer is running on that room — "Your timer is running on this room — it'll stop automatically when you use either action above" — stated before the fact, not asked as a confirmation after. Nothing here is a silent side effect: the note makes the behavior visible ahead of the click, matching this app's running rule (§17.3, §19.3) that anything conveyed through a state change also gets a line of text, not just an assumption that the user will notice.
+
+### 20.3 What this does not change
+
+Starting the timer is still a separate action from marking a room "Start"ed — clicking the workflow Start button does not also start the timer, only the reverse (stopping) is linked. A detailer who wants to review a room before actually starting the clock still can. Likewise, nothing about `stop_timer()`'s own behavior changed (§13.1's duration-derivation, §13.2's one-timer-per-user constraint) — this section only changes which frontend actions call the existing `stop()`.
