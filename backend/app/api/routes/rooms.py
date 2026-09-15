@@ -21,6 +21,7 @@ from app.services.room_service import (
     refresh_room_progress,
     transition_room_stage,
 )
+from app.services.time_entry_service import auto_start_for_room, auto_stop_for_room
 
 router = APIRouter(tags=["rooms"])
 
@@ -168,7 +169,7 @@ def update_room(
     room_id: int,
     payload: RoomUpdate,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> RoomRead:
     room = db.get(Room, room_id)
     if room is None:
@@ -185,6 +186,20 @@ def update_room(
         db.flush()
         db.refresh(room)
         refresh_room_progress(db, room)
+
+    # Automatic stage-based time tracking (replaces the old manual
+    # Start/Stop timer — see docs/ARCHITECTURE.md): the detailer action set
+    # (Start / On Hold) drives workflow_status through this same PATCH
+    # endpoint, so this is the one place a status change turns into a
+    # started or stopped clock. Moving *into* in_progress starts it; moving
+    # to anything else (blocked/waiting/etc.) stops it. Stage-transition-
+    # driven stops (Next Stage / Submit IFA/IFC review) are handled
+    # separately in room_service.transition_room_stage.
+    if "workflow_status" in data:
+        if room.workflow_status == RoomWorkflowStatus.IN_PROGRESS:
+            auto_start_for_room(db, room, current_user)
+        else:
+            auto_stop_for_room(db, room, current_user)
 
     db.commit()
     return _to_read(_room_query(db).filter(Room.id == room.id).one())

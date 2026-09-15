@@ -6,23 +6,13 @@ from app.models.enums import TimeEntrySource
 from app.schemas.user import UserRead
 
 
-class TimeEntryStart(BaseModel):
-    note: str | None = None
-
-
-class TimeEntryManualCreate(BaseModel):
-    started_at: datetime
-    # Manual entries record the duration the user typed directly rather than
-    # deriving it from two timestamps (see app/models/time_entry.py) — this
-    # is the one number the create form actually asks for.
-    duration_minutes: int = Field(gt=0, le=24 * 60)
-    note: str | None = None
-
-
 class TimeEntryUpdate(BaseModel):
-    """Manual entries only — a running or completed timer's started_at/
-    duration is a record of what actually happened and isn't editable here;
-    stop the timer or delete the entry instead."""
+    """Corrects an existing (already-stopped) automatically-tracked entry —
+    there's no manual create anymore (see time_entry_service.py's
+    auto_start_for_room/auto_stop_for_room, the sole way an entry now comes
+    into being); a *running* entry's started_at/duration isn't editable
+    here since it's still an open record of what's actually happening —
+    delete it instead if it's stuck."""
 
     started_at: datetime | None = None
     duration_minutes: int | None = Field(default=None, gt=0, le=24 * 60)

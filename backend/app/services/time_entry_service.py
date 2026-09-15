@@ -101,6 +101,40 @@ def create_manual_entry(
     return entry
 
 
+def auto_start_for_room(db: Session, room: Room, actor: User) -> None:
+    """Side effect of a detailer clicking Start on their own room — begins
+    an automatic stage-clock in place of the old manual "Start timer"
+    control (see docs/ARCHITECTURE.md, "automatic time tracking"). A no-op
+    if a clock is already running on this exact room (a repeat Start click,
+    e.g. after a page refresh); otherwise subject to the same
+    one-running-timer-per-user rule the manual timer used — this is what
+    now enforces "one active task per detailer" without any separate check.
+    Only ever tracks the room's own assigned detailer's time; a manager or
+    team leader changing someone else's room status through the same PATCH
+    endpoint doesn't start a clock on that detailer's behalf.
+    """
+    if room.assigned_detailer_id != actor.id:
+        return
+    active = get_active_entry(db, actor)
+    if active is not None and active.room_id == room.id:
+        return
+    start_timer(db, room=room, user=actor, note=None)
+
+
+def auto_stop_for_room(db: Session, room: Room, actor: User) -> None:
+    """Side effect of a detailer putting a room on hold, submitting it for
+    IFA/IFC review, or moving it to the next stage — stops their own
+    automatic stage-clock if it's the one currently running on this room.
+    A no-op otherwise (nothing running, or the running entry belongs to a
+    different room or a different user than the one acting) — see
+    auto_start_for_room above and docs/ARCHITECTURE.md."""
+    if room.assigned_detailer_id != actor.id:
+        return
+    active = get_active_entry(db, actor)
+    if active is not None and active.room_id == room.id:
+        stop_timer(db, active)
+
+
 def apply_manual_update(
     entry: TimeEntry,
     started_at: datetime | None,

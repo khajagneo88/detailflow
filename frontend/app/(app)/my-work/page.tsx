@@ -2,15 +2,15 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { AlertTriangle, CheckCircle2, PlayCircle } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useAuth } from "@/features/auth/AuthContext";
+import { RoomActions } from "@/features/rooms/RoomActions";
 import { roomsApi, workflowStagesApi } from "@/features/rooms/api";
 import { ApiError } from "@/lib/api-client";
-import { BUCKET_META, BUCKET_ORDER, Bucket, bucketFor, getReadyForCheckTarget } from "@/lib/room-workflow";
+import { BUCKET_META, BUCKET_ORDER, Bucket, bucketFor } from "@/lib/room-workflow";
 import {
   PRIORITY_LABELS,
   PRIORITY_VARIANTS,
@@ -32,38 +32,8 @@ function RoomRow({
   isDetailer: boolean;
   onChanged: (room: Room) => void;
 }) {
-  const [busy, setBusy] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
-  const readyTarget = getReadyForCheckTarget(room, stages);
-
-  async function handleStart() {
-    setBusy(true);
-    setError(null);
-    try {
-      onChanged(await roomsApi.updateStatus(room.id, "in_progress"));
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleReady() {
-    if (!readyTarget) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await roomsApi.createStageTransition(room.id, { to_stage_key: readyTarget.key });
-      onChanged(await roomsApi.get(room.id));
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
-    <div className="flex flex-col gap-2 border-b border-border px-4 py-3 last:border-b-0 sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex flex-col gap-2 border-b border-border px-4 py-3 last:border-b-0 sm:flex-row sm:items-start sm:justify-between">
       <div className="flex flex-col gap-1">
         <Link
           href={`/rooms/${room.id}`}
@@ -79,29 +49,25 @@ function RoomRow({
           {room.apartment_name && <> · {room.apartment_name}</>} ·
           <Badge variant={stageVariant(room.workflow_stage.key)}>{room.workflow_stage.name}</Badge>
         </p>
-        {error && <p className="text-xs text-danger">{error}</p>}
+        <div className="flex flex-wrap items-center gap-2 pt-0.5">
+          <Badge variant={PRIORITY_VARIANTS[room.priority]}>{PRIORITY_LABELS[room.priority]}</Badge>
+          <Badge variant={ROOM_WORKFLOW_STATUS_VARIANTS[room.workflow_status]}>
+            {ROOM_WORKFLOW_STATUS_LABELS[room.workflow_status]}
+          </Badge>
+          <span className="text-xs text-muted-foreground">Due {formatDate(room.due_date)}</span>
+        </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <Badge variant={PRIORITY_VARIANTS[room.priority]}>{PRIORITY_LABELS[room.priority]}</Badge>
-        <Badge variant={ROOM_WORKFLOW_STATUS_VARIANTS[room.workflow_status]}>
-          {ROOM_WORKFLOW_STATUS_LABELS[room.workflow_status]}
-        </Badge>
-        <span className="text-xs text-muted-foreground">Due {formatDate(room.due_date)}</span>
-
-        {isDetailer && room.workflow_status === "not_started" && (
-          <Button size="sm" variant="outline" disabled={busy} onClick={handleStart}>
-            <PlayCircle className="h-3.5 w-3.5" />
-            Start
-          </Button>
-        )}
-        {isDetailer && readyTarget && (
-          <Button size="sm" variant="outline" disabled={busy} onClick={handleReady}>
-            <CheckCircle2 className="h-3.5 w-3.5" />
-            Ready for Check
-          </Button>
-        )}
-      </div>
+      {isDetailer && (
+        <div className="sm:max-w-xs sm:shrink-0">
+          <RoomActions
+            room={room}
+            stages={stages}
+            onStatusChanged={onChanged}
+            onTransitioned={(updated) => onChanged(updated)}
+          />
+        </div>
+      )}
     </div>
   );
 }

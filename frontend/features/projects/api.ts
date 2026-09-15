@@ -49,6 +49,17 @@ export const projectsApi = {
     ),
   get: (id: number) => apiClient.get<Project>(`/projects/${id}`),
   create: (input: ProjectCreateInput) => apiClient.post<Project>("/projects", input),
+  // Archive/unarchive is just the existing is_archived flag through the
+  // existing PATCH endpoint (Manager/Team Leader/Admin — same as every
+  // other project edit) — reversible, keeps every apartment/room/batch/
+  // time entry, just hides the project from the default list. See
+  // setArchived below and the real DELETE for the irreversible alternative.
+  setArchived: (id: number, is_archived: boolean) =>
+    apiClient.patch<Project>(`/projects/${id}`, { is_archived }),
+  // Permanent, irreversible — cascades through every apartment, room and
+  // batch belonging to the project on the backend. Manager/Team Leader/
+  // Admin only, same as setArchived.
+  remove: (id: number) => apiClient.delete<void>(`/projects/${id}`),
   listApartments: (projectId: number) =>
     apiClient.get<Apartment[]>(`/projects/${projectId}/apartments`),
   listRooms: (projectId: number) => apiClient.get<Room[]>(`/projects/${projectId}/rooms`),

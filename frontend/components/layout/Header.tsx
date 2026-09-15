@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Bell, CheckCheck, LogOut, Square, Timer } from "lucide-react";
+import { Bell, CheckCheck, LogOut, Timer } from "lucide-react";
 import * as React from "react";
 
 import { Button } from "@/components/ui/button";
@@ -14,40 +14,27 @@ import { formatElapsed, formatRelativeTime, useElapsedSeconds } from "@/lib/time
 import { ROLE_LABELS } from "@/lib/status";
 import type { Notification } from "@/types";
 
+/** Read-only display of the current user's automatic stage-clock — there's
+ * no manual timer to stop anymore (see TimeTrackingContext): it stops
+ * itself the moment the detailer puts the room on hold, submits it for
+ * review, or moves it to the next stage. This chip just shows where that
+ * clock is currently running. */
 function RunningTimerChip() {
-  const { activeEntry, stop } = useTimeTracking();
-  const [isStopping, setIsStopping] = React.useState(false);
+  const { activeEntry } = useTimeTracking();
   const elapsed = useElapsedSeconds(activeEntry?.started_at ?? null);
 
   if (!activeEntry) return null;
 
-  const handleStop = async () => {
-    setIsStopping(true);
-    try {
-      await stop();
-    } finally {
-      setIsStopping(false);
-    }
-  };
-
   return (
-    <div className="flex items-center gap-2 rounded-md border border-primary/30 bg-primary/5 py-1.5 pl-3 pr-1.5 text-sm">
+    <Link
+      href={`/rooms/${activeEntry.room_id}`}
+      className="flex items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-1.5 text-sm hover:bg-primary/10"
+      title="Time is being tracked automatically for this room"
+    >
       <Timer className="h-4 w-4 text-primary" />
-      <Link href={`/rooms/${activeEntry.room_id}`} className="font-medium hover:underline">
-        {activeEntry.room_name ?? "Room"}
-      </Link>
+      <span className="font-medium">{activeEntry.room_name ?? "Room"}</span>
       <span className="tabular-nums text-muted-foreground">{formatElapsed(elapsed)}</span>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-7 w-7"
-        onClick={handleStop}
-        disabled={isStopping}
-        title="Stop timer"
-      >
-        <Square className="h-3.5 w-3.5 fill-current" />
-      </Button>
-    </div>
+    </Link>
   );
 }
 

@@ -7,19 +7,8 @@ from app.models.enums import UserRole
 from app.models.room import Room
 from app.models.time_entry import TimeEntry
 from app.models.user import User
-from app.schemas.time_entry import (
-    TimeEntryManualCreate,
-    TimeEntryRead,
-    TimeEntryStart,
-    TimeEntryUpdate,
-)
-from app.services.time_entry_service import (
-    apply_manual_update,
-    create_manual_entry,
-    get_active_entry,
-    start_timer,
-    stop_timer,
-)
+from app.schemas.time_entry import TimeEntryRead, TimeEntryUpdate
+from app.services.time_entry_service import apply_manual_update, get_active_entry
 
 router = APIRouter(tags=["time-entries"])
 
@@ -81,35 +70,6 @@ def get_active_timer(
     return _to_read(_entry_query(db).filter(TimeEntry.id == entry.id).one())
 
 
-@router.post(
-    "/rooms/{room_id}/time-entries/start",
-    response_model=TimeEntryRead,
-    status_code=status.HTTP_201_CREATED,
-)
-def start_room_timer(
-    room_id: int,
-    payload: TimeEntryStart,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> TimeEntryRead:
-    room = _get_room_or_404(db, room_id)
-    entry = start_timer(db, room=room, user=current_user, note=payload.note)
-    return _to_read(_entry_query(db).filter(TimeEntry.id == entry.id).one())
-
-
-@router.post("/time-entries/{entry_id}/stop", response_model=TimeEntryRead)
-def stop_room_timer(
-    entry_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> TimeEntryRead:
-    entry = _get_entry_or_404(db, entry_id)
-    if entry.user_id != current_user.id:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "You can only stop your own timer.")
-    stop_timer(db, entry)
-    return _to_read(_entry_query(db).filter(TimeEntry.id == entry.id).one())
-
-
 @router.get("/rooms/{room_id}/time-entries", response_model=list[TimeEntryRead])
 def list_room_time_entries(
     room_id: int,
@@ -124,29 +84,6 @@ def list_room_time_entries(
         .all()
     )
     return [_to_read(e) for e in entries]
-
-
-@router.post(
-    "/rooms/{room_id}/time-entries",
-    response_model=TimeEntryRead,
-    status_code=status.HTTP_201_CREATED,
-)
-def create_room_time_entry(
-    room_id: int,
-    payload: TimeEntryManualCreate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> TimeEntryRead:
-    room = _get_room_or_404(db, room_id)
-    entry = create_manual_entry(
-        db,
-        room=room,
-        user=current_user,
-        started_at=payload.started_at,
-        duration_minutes=payload.duration_minutes,
-        note=payload.note,
-    )
-    return _to_read(_entry_query(db).filter(TimeEntry.id == entry.id).one())
 
 
 @router.patch("/time-entries/{entry_id}", response_model=TimeEntryRead)

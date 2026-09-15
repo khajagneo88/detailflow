@@ -1,12 +1,20 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { useAuth } from "@/features/auth/AuthContext";
 import { TimeTrackingProvider } from "@/features/time-entries/TimeTrackingContext";
+
+// Mirrors components/layout/Sidebar.tsx's DETAILER_HIDDEN_HREFS — a
+// Detailer landing on one of these directly (a stale bookmark, a pasted
+// link) gets bounced to Dashboard rather than shown a page whose backend
+// calls would mostly 403 anyway. This is convenience only, not the real
+// security boundary — every API call independently enforces its own role
+// check server-side (see docs/ARCHITECTURE.md §2).
+const DETAILER_RESTRICTED_PREFIXES = ["/projects", "/team", "/planning", "/reports", "/settings"];
 
 /**
  * Route-group layout for every authenticated screen. Auth is enforced
@@ -18,12 +26,20 @@ import { TimeTrackingProvider } from "@/features/time-entries/TimeTrackingContex
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
 
   React.useEffect(() => {
     if (!isLoading && !user) {
       router.replace("/login");
     }
   }, [isLoading, user, router]);
+
+  React.useEffect(() => {
+    if (!user || user.role !== "detailer") return;
+    if (DETAILER_RESTRICTED_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
+      router.replace("/dashboard");
+    }
+  }, [user, pathname, router]);
 
   if (isLoading) {
     return (

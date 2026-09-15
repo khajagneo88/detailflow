@@ -74,8 +74,21 @@ class Room(Base, TimestampMixin):
         order_by="RoomStageEvent.created_at",
     )
     comments = relationship("Comment", back_populates="room", order_by="Comment.created_at")
+    # passive_deletes=True: TimeEntry.room_id is NOT NULL with its own
+    # ON DELETE CASCADE (see app/models/time_entry.py) — without this flag
+    # SQLAlchemy ignores that DB-level cascade and instead tries to manage
+    # the relationship itself by UPDATE-ing each child's room_id to NULL
+    # when the room is deleted, which violates the NOT NULL constraint and
+    # 500s (hit by DELETE /projects/{id} cascading through a room that has
+    # logged time — room_service/rooms.py's own single-room delete endpoint
+    # never reaches this because it refuses to delete a room with any
+    # history first). This tells the ORM to leave deletion of matching rows
+    # to the database instead.
     time_entries = relationship(
-        "TimeEntry", back_populates="room", order_by="TimeEntry.started_at"
+        "TimeEntry",
+        back_populates="room",
+        order_by="TimeEntry.started_at",
+        passive_deletes=True,
     )
 
     def __repr__(self) -> str:  # pragma: no cover

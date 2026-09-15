@@ -8,14 +8,17 @@ import type { TimeEntry } from "@/types";
 import { timeEntriesApi } from "./api";
 
 interface TimeTrackingContextValue {
-  /** The current user's running timer, across every room — there can be at
-   * most one (enforced by a DB constraint on the backend). Null while
-   * nothing is running. */
+  /** The current user's running automatic stage-clock, across every room —
+   * there can be at most one (enforced by a DB constraint on the backend,
+   * which is also what makes "one active task per detailer" hold). Null
+   * while nothing is running. Read-only: it starts and stops itself as a
+   * side effect of the Start / On Hold / Next Stage / Submit IFA / Submit
+   * IFC review actions (see features/rooms/RoomActions.tsx) — there's no
+   * more manual start/stop control, so this context exists purely to poll
+   * and display it (the header's chip, "running elsewhere" messaging). */
   activeEntry: TimeEntry | null;
   isLoading: boolean;
   refresh: () => Promise<void>;
-  start: (roomId: number, note?: string | null) => Promise<TimeEntry>;
-  stop: () => Promise<void>;
 }
 
 const TimeTrackingContext = React.createContext<TimeTrackingContextValue | undefined>(undefined);
@@ -58,21 +61,9 @@ export function TimeTrackingProvider({ children }: { children: React.ReactNode }
     };
   }, [refresh]);
 
-  const start = React.useCallback(async (roomId: number, note?: string | null) => {
-    const entry = await timeEntriesApi.start(roomId, note);
-    setActiveEntry(entry);
-    return entry;
-  }, []);
-
-  const stop = React.useCallback(async () => {
-    if (!activeEntry) return;
-    await timeEntriesApi.stop(activeEntry.id);
-    setActiveEntry(null);
-  }, [activeEntry]);
-
   const value = React.useMemo(
-    () => ({ activeEntry, isLoading, refresh, start, stop }),
-    [activeEntry, isLoading, refresh, start, stop]
+    () => ({ activeEntry, isLoading, refresh }),
+    [activeEntry, isLoading, refresh]
   );
 
   return <TimeTrackingContext.Provider value={value}>{children}</TimeTrackingContext.Provider>;

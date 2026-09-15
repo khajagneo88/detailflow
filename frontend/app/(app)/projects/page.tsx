@@ -32,13 +32,14 @@ export default function ProjectsPage() {
   const { user } = useAuth();
   const [projects, setProjects] = React.useState<ProjectListItem[] | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const [showArchived, setShowArchived] = React.useState(false);
 
   React.useEffect(() => {
     projectsApi
-      .list()
+      .list(showArchived)
       .then(setProjects)
       .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load."));
-  }, []);
+  }, [showArchived]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -49,12 +50,23 @@ export default function ProjectsPage() {
             Every active detailing project across the team.
           </p>
         </div>
-        {canManage(user?.role) && (
-          <Link href="/projects/new" className={buttonVariants({ className: "shrink-0" })}>
-            <Plus className="h-4 w-4" />
-            New Project
-          </Link>
-        )}
+        <div className="flex shrink-0 items-center gap-3">
+          <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={showArchived}
+              onChange={(e) => setShowArchived(e.target.checked)}
+              className="h-3.5 w-3.5 rounded border-border"
+            />
+            Show archived
+          </label>
+          {canManage(user?.role) && (
+            <Link href="/projects/new" className={buttonVariants({})}>
+              <Plus className="h-4 w-4" />
+              New Project
+            </Link>
+          )}
+        </div>
       </div>
 
       {error && <p className="text-sm text-danger">{error}</p>}
@@ -92,9 +104,10 @@ export default function ProjectsPage() {
                     <TableCell>
                       <Link
                         href={`/projects/${project.id}`}
-                        className="font-medium text-foreground hover:text-primary hover:underline"
+                        className="flex items-center gap-1.5 font-medium text-foreground hover:text-primary hover:underline"
                       >
                         {project.name}
+                        {project.is_archived && <Badge variant="neutral">Archived</Badge>}
                       </Link>
                       <p className="text-xs text-muted-foreground">{project.project_number}</p>
                     </TableCell>

@@ -3,18 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import {
-  AlertTriangle,
-  ArrowRight,
-  CheckCircle2,
-  Pencil,
-  Play,
-  PlayCircle,
-  Plus,
-  RotateCcw,
-  Square,
-  Trash2,
-} from "lucide-react";
+import { ArrowRight, CheckCircle2, Pencil, RotateCcw, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,11 +16,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/features/auth/AuthContext";
 import { batchesApi } from "@/features/batches/api";
 import { commentsApi, roomsApi, workflowStagesApi } from "@/features/rooms/api";
+import { RoomActions } from "@/features/rooms/RoomActions";
 import { timeEntriesApi } from "@/features/time-entries/api";
-import { useTimeTracking } from "@/features/time-entries/TimeTrackingContext";
 import { ApiError } from "@/lib/api-client";
-import { WAITING_ON_SOMEONE_ELSE, getReadyForCheckTarget } from "@/lib/room-workflow";
-import { formatElapsed, minutesToHours, useElapsedSeconds } from "@/lib/time";
+import { minutesToHours } from "@/lib/time";
 import {
   BATCH_STATUS_LABELS,
   batchStatusVariant,
@@ -200,203 +188,51 @@ function StageTransitionCard({
   );
 }
 
-/** The detailer-facing alternative to StageTransitionCard — three plain
- * actions instead of an any-stage picker. Managers/team leaders/admins keep
- * the full picker (with outcome tracking) since deciding what comes back
- * from a review is their call, not a detailer's. See docs/ARCHITECTURE.md §12. */
+/** The detailer-facing alternative to StageTransitionCard — Start / On Hold
+ * / Next Stage (dynamically labelled Submit IFA/IFC review at the two
+ * review checkpoints) instead of an any-stage picker, shared with My Work
+ * via features/rooms/RoomActions.tsx. Managers/team leaders/admins keep the
+ * full picker (with outcome tracking) since deciding what comes back from a
+ * review is their call, not a detailer's. See docs/ARCHITECTURE.md §12. */
 function DetailerActionsCard({
   room,
   stages,
   onTransitioned,
   onStatusChanged,
   onCommentPosted,
-  onTimeEntriesChanged,
 }: {
   room: Room;
   stages: WorkflowStage[];
   onTransitioned: (room: Room, event: RoomStageEvent) => void;
   onStatusChanged: (room: Room) => void;
   onCommentPosted: (comment: Comment) => void;
-  onTimeEntriesChanged: (entries: TimeEntry[]) => void;
 }) {
-  const [onHoldOpen, setOnHoldOpen] = React.useState(false);
-  const [onHoldType, setOnHoldType] = React.useState<CommentType>("rfi");
-  const [onHoldBody, setOnHoldBody] = React.useState("");
-  const [error, setError] = React.useState<string | null>(null);
-  const [busy, setBusy] = React.useState<"start" | "hold" | "ready" | null>(null);
-  const { activeEntry, stop } = useTimeTracking();
-
-  const readyTarget = getReadyForCheckTarget(room, stages);
-  // On Hold and Ready for Check both mean "I'm stepping away from this room
-  // right now" — stopping a timer still running on it here means the logged
-  // time always matches what was actually happening, without the detailer
-  // having to separately remember the Time card's own Stop button (§13.4/§20).
-  const isRunningHere = activeEntry?.room_id === room.id;
-
-  async function stopTimerIfRunningHere() {
-    if (!isRunningHere) return;
-    await stop();
-    onTimeEntriesChanged(await timeEntriesApi.listForRoom(room.id));
-  }
-
-  async function handleStart() {
-    setError(null);
-    setBusy("start");
-    try {
-      const updated = await roomsApi.updateStatus(room.id, "in_progress");
-      onStatusChanged(updated);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to start.");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function handleReadyForCheck() {
-    if (!readyTarget) return;
-    setError(null);
-    setBusy("ready");
-    try {
-      await stopTimerIfRunningHere();
-      const event = await roomsApi.createStageTransition(room.id, {
-        to_stage_key: readyTarget.key,
-      });
-      const updatedRoom = await roomsApi.get(room.id);
-      onTransitioned(updatedRoom, event);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to mark ready.");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function handleOnHoldSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!onHoldBody.trim()) return;
-    setError(null);
-    setBusy("hold");
-    try {
-      await stopTimerIfRunningHere();
-      const comment = await commentsApi.create(room.project_id, {
-        room_id: room.id,
-        apartment_id: room.apartment_id,
-        type: onHoldType,
-        body: onHoldBody,
-      });
-      onCommentPosted(comment);
-      const updatedRoom = await roomsApi.updateStatus(room.id, "blocked");
-      onStatusChanged(updatedRoom);
-      setOnHoldBody("");
-      setOnHoldOpen(false);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to put this on hold.");
-    } finally {
-      setBusy(null);
-    }
-  }
-
   return (
     <Card>
       <CardHeader>
         <CardTitle className="text-sm font-semibold text-foreground">Your actions</CardTitle>
       </CardHeader>
-      <CardContent className="flex flex-col gap-3">
-        {room.workflow_status === "not_started" && (
-          <Button onClick={handleStart} disabled={busy !== null}>
-            <PlayCircle className="h-4 w-4" />
-            {busy === "start" ? "Starting…" : "Start"}
-          </Button>
-        )}
-
-        {readyTarget && (
-          <Button onClick={handleReadyForCheck} disabled={busy !== null} variant="outline">
-            <CheckCircle2 className="h-4 w-4" />
-            {busy === "ready" ? "Marking ready…" : `Ready for Check (${readyTarget.name})`}
-          </Button>
-        )}
-
-        {!onHoldOpen ? (
-          <Button
-            onClick={() => setOnHoldOpen(true)}
-            disabled={busy !== null}
-            variant="outline"
-            className="border-danger/40 text-danger hover:bg-danger-bg"
-          >
-            <AlertTriangle className="h-4 w-4" />
-            On Hold — flag a problem
-          </Button>
-        ) : null}
-
-        {isRunningHere && (
-          <p className="text-xs text-muted-foreground">
-            Your timer is running on this room — it&apos;ll stop automatically when you use either
-            action above.
-          </p>
-        )}
-
-        {onHoldOpen && (
-          <form onSubmit={handleOnHoldSubmit} className="flex flex-col gap-3 rounded-md border border-border p-3">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="on-hold-type">Type</Label>
-              <Select
-                id="on-hold-type"
-                value={onHoldType}
-                onChange={(e) => setOnHoldType(e.target.value as CommentType)}
-              >
-                <option value="rfi">RFI — I need information</option>
-                <option value="blocker">Blocker — something&apos;s stopping me</option>
-              </Select>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="on-hold-body">What&apos;s the question or problem?</Label>
-              <Textarea
-                id="on-hold-body"
-                rows={3}
-                required
-                autoFocus
-                value={onHoldBody}
-                onChange={(e) => setOnHoldBody(e.target.value)}
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <Button type="submit" disabled={busy !== null} size="sm">
-                {busy === "hold" ? "Submitting…" : "Put on hold"}
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                disabled={busy !== null}
-                onClick={() => {
-                  setOnHoldOpen(false);
-                  setOnHoldBody("");
-                }}
-              >
-                Cancel
-              </Button>
-            </div>
-          </form>
-        )}
-
-        {!readyTarget && room.workflow_status !== "not_started" && (
-          <p className="text-xs text-muted-foreground">
-            {WAITING_ON_SOMEONE_ELSE.has(room.workflow_stage.key)
-              ? "This room is waiting on a review right now — nothing to mark ready."
-              : "No further stage to move to."}
-          </p>
-        )}
-
-        {error && <p className="rounded-md bg-danger-bg px-3 py-2 text-sm text-danger">{error}</p>}
+      <CardContent>
+        <RoomActions
+          room={room}
+          stages={stages}
+          onStatusChanged={onStatusChanged}
+          onTransitioned={(updatedRoom, event) => onTransitioned(updatedRoom, event)}
+          onCommentPosted={onCommentPosted}
+        />
       </CardContent>
     </Card>
   );
 }
 
-/** Start/stop a timer on this room, log a manual entry, and see/edit the
- * room's time history. The running timer itself is global state (there can
- * only be one, on any room) shared with the header's indicator via
- * TimeTrackingContext — this card is just another view onto it, plus the
- * per-room list that context doesn't need to know about. */
+/** Read-only view of this room's automatically-tracked time — there's no
+ * more manual "start timer"/"stop"/"add manual entry" flow (see
+ * docs/ARCHITECTURE.md's automatic time-tracking section and
+ * features/rooms/RoomActions.tsx, which is what actually starts/stops the
+ * clock now, as a side effect of the detailer's own action buttons). Edit
+ * and delete are kept for correcting an entry after the fact — whoever
+ * logged it, or a manager/team leader/admin cleaning up on anyone's
+ * behalf. */
 function TimeCard({
   room,
   entries,
@@ -407,20 +243,12 @@ function TimeCard({
   onEntriesChanged: (entries: TimeEntry[]) => void;
 }) {
   const { user } = useAuth();
-  const { activeEntry, start, stop } = useTimeTracking();
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
-  const [manualOpen, setManualOpen] = React.useState(false);
-  const [manualDate, setManualDate] = React.useState("");
-  const [manualMinutes, setManualMinutes] = React.useState("");
-  const [manualNote, setManualNote] = React.useState("");
   const [editingId, setEditingId] = React.useState<number | null>(null);
   const [editMinutes, setEditMinutes] = React.useState("");
   const [editNote, setEditNote] = React.useState("");
 
-  const isRunningHere = activeEntry?.room_id === room.id;
-  const runningElsewhere = activeEntry && !isRunningHere ? activeEntry : null;
-  const elapsed = useElapsedSeconds(isRunningHere ? activeEntry.started_at : null);
   const totalMinutes = entries.reduce((sum, e) => sum + (e.duration_minutes ?? 0), 0);
 
   function canModify(entry: TimeEntry): boolean {
@@ -442,43 +270,6 @@ function TimeCard({
     } finally {
       setBusy(false);
     }
-  }
-
-  const handleStart = () =>
-    runAction(async () => {
-      await start(room.id);
-      await reloadEntries();
-    }, "Failed to start timer.");
-
-  const handleSwitchHere = () =>
-    runAction(async () => {
-      await stop();
-      await start(room.id);
-      await reloadEntries();
-    }, "Failed to switch the timer here.");
-
-  const handleStop = () =>
-    runAction(async () => {
-      await stop();
-      await reloadEntries();
-    }, "Failed to stop timer.");
-
-  async function handleManualSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    const minutes = Math.round(Number(manualMinutes));
-    if (!manualDate || !minutes || minutes <= 0) return;
-    await runAction(async () => {
-      await timeEntriesApi.createManual(room.id, {
-        started_at: new Date(manualDate).toISOString(),
-        duration_minutes: minutes,
-        note: manualNote || null,
-      });
-      await reloadEntries();
-      setManualDate("");
-      setManualMinutes("");
-      setManualNote("");
-      setManualOpen(false);
-    }, "Failed to add entry.");
   }
 
   function startEdit(entry: TimeEntry) {
@@ -516,99 +307,9 @@ function TimeCard({
             {minutesToHours(totalMinutes).toFixed(1)}h
           </span>
         </div>
-
-        {isRunningHere ? (
-          <div className="flex items-center justify-between rounded-md border border-primary/30 bg-primary/5 px-3 py-2">
-            <span className="text-sm font-medium tabular-nums">{formatElapsed(elapsed)}</span>
-            <Button size="sm" variant="outline" onClick={handleStop} disabled={busy}>
-              <Square className="h-3.5 w-3.5 fill-current" />
-              Stop
-            </Button>
-          </div>
-        ) : runningElsewhere ? (
-          <div className="flex flex-col gap-2 rounded-md border border-border bg-surface-muted px-3 py-2 text-sm">
-            <p className="text-muted-foreground">
-              You have a timer running on{" "}
-              <span className="font-medium text-foreground">
-                {runningElsewhere.room_name ?? "another room"}
-              </span>
-              .
-            </p>
-            <Button size="sm" variant="outline" onClick={handleSwitchHere} disabled={busy}>
-              Switch timer here
-            </Button>
-          </div>
-        ) : (
-          <Button size="sm" onClick={handleStart} disabled={busy} className="self-start">
-            <Play className="h-3.5 w-3.5" />
-            Start timer
-          </Button>
-        )}
-
-        {!manualOpen ? (
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => setManualOpen(true)}
-            disabled={busy}
-            className="self-start"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Add manual entry
-          </Button>
-        ) : (
-          <form
-            onSubmit={handleManualSubmit}
-            className="flex flex-col gap-3 rounded-md border border-border p-3"
-          >
-            <div className="grid grid-cols-2 gap-3">
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="manual-date">When</Label>
-                <Input
-                  id="manual-date"
-                  type="datetime-local"
-                  required
-                  value={manualDate}
-                  onChange={(e) => setManualDate(e.target.value)}
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="manual-minutes">Minutes</Label>
-                <Input
-                  id="manual-minutes"
-                  type="number"
-                  min={1}
-                  required
-                  value={manualMinutes}
-                  onChange={(e) => setManualMinutes(e.target.value)}
-                />
-              </div>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="manual-note">Note (optional)</Label>
-              <Textarea
-                id="manual-note"
-                rows={2}
-                value={manualNote}
-                onChange={(e) => setManualNote(e.target.value)}
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <Button type="submit" size="sm" disabled={busy}>
-                Add entry
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                disabled={busy}
-                onClick={() => setManualOpen(false)}
-              >
-                Cancel
-              </Button>
-            </div>
-          </form>
-        )}
+        <p className="text-xs text-muted-foreground">
+          Tracked automatically from Start / On Hold / Next Stage — no manual timer to run.
+        </p>
 
         {error && <p className="rounded-md bg-danger-bg px-3 py-2 text-sm text-danger">{error}</p>}
 
@@ -1097,7 +798,6 @@ export default function RoomDetailPage() {
               onCommentPosted={(comment) =>
                 setComments((prev) => (prev ? [comment, ...prev] : [comment]))
               }
-              onTimeEntriesChanged={setEntries}
             />
           ) : (
             <StageTransitionCard

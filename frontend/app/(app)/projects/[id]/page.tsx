@@ -1,8 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { useParams } from "next/navigation";
-import { ClipboardPaste, Plus } from "lucide-react";
+import { useParams, useRouter } from "next/navigation";
+import { Archive, ArchiveRestore, ClipboardPaste, Plus, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -51,6 +51,77 @@ function StatRow({ label, value }: { label: string; value: React.ReactNode }) {
       <span className="text-muted-foreground">{label}</span>
       <span className="font-medium">{value}</span>
     </div>
+  );
+}
+
+/** Irreversible — cascades through every apartment, room, batch and their
+ * time/stage history on the backend (see DELETE /projects/{id}). Requires
+ * typing the project number back, same pattern as any other "type X to
+ * confirm" destructive-action dialog, since there's no undo. */
+function DeleteProjectDialog({
+  project,
+  onClose,
+  onDeleted,
+}: {
+  project: Project;
+  onClose: () => void;
+  onDeleted: () => void;
+}) {
+  const [confirmText, setConfirmText] = React.useState("");
+  const [error, setError] = React.useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = React.useState(false);
+
+  async function handleDelete() {
+    setError(null);
+    setIsDeleting(true);
+    try {
+      await projectsApi.remove(project.id);
+      onDeleted();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to delete project.");
+      setIsDeleting(false);
+    }
+  }
+
+  return (
+    <Dialog open onClose={onClose} title="Delete project permanently">
+      <div className="flex flex-col gap-4">
+        <p className="text-sm text-foreground">
+          This permanently deletes <span className="font-medium">{project.name}</span> — every
+          apartment, room, comment, stage history and logged time entry goes with it. This can&apos;t
+          be undone.
+        </p>
+        <p className="text-sm text-muted-foreground">
+          If you just want it out of the way for now, use <span className="font-medium">Archive</span>{" "}
+          instead — it&apos;s reversible and keeps everything.
+        </p>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="delete-confirm">
+            Type <span className="font-mono font-medium">{project.project_number}</span> to confirm
+          </Label>
+          <Input
+            id="delete-confirm"
+            autoFocus
+            value={confirmText}
+            onChange={(e) => setConfirmText(e.target.value)}
+          />
+        </div>
+        {error && <p className="rounded-md bg-danger-bg px-3 py-2 text-sm text-danger">{error}</p>}
+        <div className="flex items-center gap-2">
+          <Button
+            variant="destructive"
+            disabled={confirmText !== project.project_number || isDeleting}
+            onClick={handleDelete}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            {isDeleting ? "Deleting…" : "Delete permanently"}
+          </Button>
+          <Button type="button" variant="ghost" onClick={onClose} disabled={isDeleting}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    </Dialog>
   );
 }
 
@@ -340,6 +411,7 @@ function AddRoomDialog({
 
 export default function ProjectDetailPage() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const projectId = Number(params.id);
   const { user } = useAuth();
   const canAdd = user !== null && MANAGEMENT_ROLES.has(user.role);
@@ -350,6 +422,9 @@ export default function ProjectDetailPage() {
   const [rooms, setRooms] = React.useState<Room[] | null>(null);
   const [detailers, setDetailers] = React.useState<User[]>([]);
   const [error, setError] = React.useState<string | null>(null);
+  const [archiveBusy, setArchiveBusy] = React.useState(false);
+  const [archiveError, setArchiveError] = React.useState<string | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
 
   const [apartmentDialogOpen, setApartmentDialogOpen] = React.useState(false);
   // undefined = closed; null = "add room, no apartment preselected"; a
@@ -358,6 +433,19 @@ export default function ProjectDetailPage() {
     number | null | undefined
   >(undefined);
   const [bulkDialogOpen, setBulkDialogOpen] = React.useState(false);
+
+  async function handleToggleArchive() {
+    if (!project) return;
+    setArchiveError(null);
+    setArchiveBusy(true);
+    try {
+      setProject(await projectsApi.setArchived(project.id, !project.is_archived));
+    } catch (err) {
+      setArchiveError(err instanceof ApiError ? err.message : "Failed to update.");
+    } finally {
+      setArchiveBusy(false);
+    }
+  }
 
   React.useEffect(() => {
     if (!Number.isFinite(projectId)) return;
@@ -403,15 +491,44 @@ export default function ProjectDetailPage() {
           </p>
           <h1 className="text-xl font-semibold tracking-tight">{project.name}</h1>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {project.is_archived && <Badge variant="neutral">Archived</Badge>}
           <Badge variant={PRIORITY_VARIANTS[project.priority]}>
             {PRIORITY_LABELS[project.priority]} priority
           </Badge>
           <Badge variant={PROJECT_STATUS_VARIANTS[project.status]}>
             {PROJECT_STATUS_LABELS[project.status]}
           </Badge>
+          {canAdd && (
+            <>
+              <Button size="sm" variant="outline" disabled={archiveBusy} onClick={handleToggleArchive}>
+                {project.is_archived ? (
+                  <>
+                    <ArchiveRestore className="h-3.5 w-3.5" />
+                    Unarchive
+                  </>
+                ) : (
+                  <>
+                    <Archive className="h-3.5 w-3.5" />
+                    Archive
+                  </>
+                )}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-danger/40 text-danger hover:bg-danger-bg"
+                onClick={() => setDeleteDialogOpen(true)}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Delete permanently
+              </Button>
+            </>
+          )}
         </div>
       </div>
+
+      {archiveError && <p className="text-sm text-danger">{archiveError}</p>}
 
       <Tabs defaultValue="overview">
         <TabsList>
@@ -617,6 +734,14 @@ export default function ProjectDetailPage() {
             setApartments((prev) => (prev ? [...prev, apartment] : [apartment]))
           }
           onRoomCreated={(room) => setRooms((prev) => (prev ? [...prev, room] : [room]))}
+        />
+      )}
+
+      {canAdd && deleteDialogOpen && (
+        <DeleteProjectDialog
+          project={project}
+          onClose={() => setDeleteDialogOpen(false)}
+          onDeleted={() => router.push("/projects")}
         />
       )}
     </div>

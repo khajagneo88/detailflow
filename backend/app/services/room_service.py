@@ -11,6 +11,7 @@ from app.models.room import Room
 from app.models.room_stage_event import RoomStageEvent
 from app.models.user import User
 from app.models.workflow_stage import WorkflowStage
+from app.services.time_entry_service import auto_stop_for_room
 
 # Stage key -> the NotificationType/title fired when a room transitions INTO
 # it, and to the project's project_manager_id specifically (the PM is the
@@ -146,5 +147,14 @@ def transition_room_stage(
         room.workflow_status = RoomWorkflowStatus.READY_FOR_REVIEW
 
     _notify_project_manager_of_stage_readiness(db, room, to_stage)
+
+    # Moving to a new stage — Next Stage, Submit IFA review, Submit IFC
+    # review, all of which land here — always stops the acting detailer's
+    # own automatic stage-clock if it's running on this room (see
+    # docs/ARCHITECTURE.md's automatic time-tracking section and
+    # time_entry_service.auto_stop_for_room). It deliberately does not
+    # auto-start a new one for the stage just entered — resuming work
+    # requires its own Start click, same as coming back from On Hold.
+    auto_stop_for_room(db, room, actor)
 
     return event

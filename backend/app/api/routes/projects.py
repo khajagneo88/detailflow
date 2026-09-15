@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.api.deps import MANAGEMENT_ROLES, get_current_user, require_role
 from app.db.session import get_db
 from app.models.apartment import Apartment
+from app.models.comment import Comment
 from app.models.enums import UserRole
 from app.models.project import Project
 from app.models.project_assignment import ProjectAssignment
@@ -133,3 +134,37 @@ def update_project(
     db.commit()
     project = _project_query(db).filter(Project.id == project_id).one()
     return _to_read(db, project)
+
+
+@router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_project(
+    project_id: int,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(require_role(*MANAGEMENT_ROLES)),
+) -> None:
+    """Permanent, irreversible delete — see is_archived / PATCH .../is_archived
+    for the reversible alternative most callers want instead. Cascades
+    through every apartment, room (and its stage-history/time-entries/
+    plan-entries), and batch belonging to this project.
+
+    Comment rows need deleting explicitly, up front: Comment.project_id/
+    apartment_id/room_id are all ON DELETE RESTRICT (see app/models/
+    comment.py) and Project has no `comments` relationship for the ORM to
+    cascade through, so a comment anywhere in this project would otherwise
+    block every delete below at the database level. Everything else here
+    already cascades — apartments/rooms/batches via ORM
+    cascade="all, delete-orphan" on the Project relationships, and rooms'
+    own stage-history/time-entries/plan-entries via a DB-level
+    ON DELETE CASCADE on their own FKs — so nothing else needs an explicit
+    delete. Notifications pointing at this project or its rooms are left in
+    place with those FKs nulled (ON DELETE SET NULL, by design — see
+    app/models/notification.py) rather than deleted.
+    """
+    project = db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found.")
+
+    db.query(Comment).filter(Comment.project_id == project_id).delete(synchronize_session=False)
+
+    db.delete(project)
+    db.commit()
