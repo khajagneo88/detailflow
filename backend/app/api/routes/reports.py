@@ -7,15 +7,21 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user
 from app.api.routes.rooms import _room_query, _to_read
 from app.db.session import get_db
+from app.models.batch import Batch
 from app.models.comment import Comment
-from app.models.enums import CommentStatus, CommentType, RoomWorkflowStatus
+from app.models.enums import BatchStatus, CommentStatus, CommentType, ProjectStatus, RoomWorkflowStatus
 from app.models.project import Project
 from app.models.room import Room
+from app.models.room_stage_event import RoomStageEvent
 from app.models.time_entry import TimeEntry
 from app.models.user import User
 from app.models.workflow_stage import WorkflowStage
 from app.schemas.report import (
     ActiveTimerItem,
+    BatchThroughputReport,
+    DetailerHoursItem,
+    ProjectBurnItem,
+    ReworkSummaryItem,
     RoomTimeSummaryItem,
     StageSummaryItem,
     TimeSummaryReport,
@@ -24,6 +30,24 @@ from app.schemas.report import (
 from app.schemas.room import RoomRead
 
 router = APIRouter(prefix="/reports", tags=["reports"])
+
+# Stage keys that represent a "revision" loop-back, across both the IFA and
+# IFC cycles (docs/ARCHITECTURE.md §21.2) — a room transitioning *into*
+# either of these is one revision, regardless of which cycle it's in.
+_REVISION_STAGE_KEYS = ("ifa_revision", "ifc_revision")
+
+
+def _period_bounds(
+    start: date | None, end: date | None
+) -> tuple[datetime | None, datetime | None]:
+    """Turns an optional inclusive [start, end] calendar-date window into
+    [start 00:00 UTC, end+1 day 00:00 UTC) datetime bounds — the same plain
+    UTC-calendar-day treatment `time_logged_for_week` above already uses,
+    consistent rather than more precise. Either bound may be omitted for an
+    open-ended (all-time) window on that side."""
+    start_dt = datetime.combine(start, time.min, tzinfo=timezone.utc) if start else None
+    end_dt = datetime.combine(end + timedelta(days=1), time.min, tzinfo=timezone.utc) if end else None
+    return start_dt, end_dt
 
 
 @router.get("/stage-summary", response_model=list[StageSummaryItem])
@@ -241,4 +265,186 @@ def time_summary(
         rooms=items,
         total_estimated_hours=round(sum(i.estimated_hours or 0 for i in items), 2),
         total_logged_hours=round(sum(i.logged_hours for i in items), 2),
+    )
+
+
+@router.get("/detailer-hours", response_model=list[DetailerHoursItem])
+def detailer_hours(
+    project_id: int | None = None,
+    start: date | None = None,
+    end: date | None = None,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+) -> list[DetailerHoursItem]:
+    """Total logged hours per user within an optional date window — powers
+    the Reports "Hours per detailer" ranked list. `start`/`end` are inclusive
+    calendar dates in the caller's own local terms; both omitted means
+    all-time. A user with nothing logged in the window has no row, ranked
+    desc by hours so the busiest detailer leads."""
+    start_dt, end_dt = _period_bounds(start, end)
+
+    query = (
+        db.query(
+            User.id.label("user_id"),
+            User.full_name.label("full_name"),
+            func.sum(TimeEntry.duration_minutes).label("logged_minutes"),
+        )
+        .join(TimeEntry, TimeEntry.user_id == User.id)
+    )
+    if project_id is not None:
+        query = query.join(Room, TimeEntry.room_id == Room.id).filter(Room.project_id == project_id)
+    if start_dt is not None:
+        query = query.filter(TimeEntry.started_at >= start_dt)
+    if end_dt is not None:
+        query = query.filter(TimeEntry.started_at < end_dt)
+
+    rows = query.group_by(User.id, User.full_name).order_by(func.sum(TimeEntry.duration_minutes).desc()).all()
+    return [
+        DetailerHoursItem(
+            user_id=row.user_id,
+            full_name=row.full_name,
+            logged_hours=round((row.logged_minutes or 0) / 60, 2),
+        )
+        for row in rows
+        if (row.logged_minutes or 0) > 0
+    ]
+
+
+@router.get("/project-burn", response_model=list[ProjectBurnItem])
+def project_burn(
+    project_id: int | None = None,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+) -> list[ProjectBurnItem]:
+    """Total logged hours (every room in the project, all-time) against
+    Project.estimated_hours — powers the Reports burn comparison. Scoped to
+    "active" projects (not archived, not yet Complete) unless a specific
+    project_id is requested, since a wrapped-up project's burn isn't
+    something a manager is tracking against anymore, but asking for one by
+    id still shows it — the same "the filter narrows, an explicit id
+    overrides it" precedent as every other /reports endpoint here."""
+    logged_subq = (
+        db.query(
+            Room.project_id.label("project_id"),
+            func.sum(TimeEntry.duration_minutes).label("logged_minutes"),
+        )
+        .join(TimeEntry, TimeEntry.room_id == Room.id)
+        .group_by(Room.project_id)
+        .subquery()
+    )
+
+    query = db.query(
+        Project.id.label("project_id"),
+        Project.name.label("project_name"),
+        Project.status.label("status"),
+        Project.estimated_hours.label("estimated_hours"),
+        func.coalesce(logged_subq.c.logged_minutes, 0).label("logged_minutes"),
+    ).outerjoin(logged_subq, logged_subq.c.project_id == Project.id)
+
+    if project_id is not None:
+        query = query.filter(Project.id == project_id)
+    else:
+        query = query.filter(Project.is_archived.is_(False), Project.status != ProjectStatus.COMPLETE)
+
+    rows = query.order_by(Project.name).all()
+    return [
+        ProjectBurnItem(
+            project_id=row.project_id,
+            project_name=row.project_name,
+            status=row.status,
+            estimated_hours=float(row.estimated_hours) if row.estimated_hours is not None else None,
+            logged_hours=round((row.logged_minutes or 0) / 60, 2),
+        )
+        for row in rows
+    ]
+
+
+@router.get("/rework-summary", response_model=list[ReworkSummaryItem])
+def rework_summary(
+    project_id: int | None = None,
+    start: date | None = None,
+    end: date | None = None,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+) -> list[ReworkSummaryItem]:
+    """Revision (a stage transition into ifa_revision/ifc_revision) and
+    Variation (a Comment with type=variation) counts per project, within an
+    optional date window — surfaces where rework is concentrated. Projects
+    with zero of both are omitted; the rest are ranked desc by the combined
+    total."""
+    start_dt, end_dt = _period_bounds(start, end)
+
+    revision_query = (
+        db.query(Room.project_id.label("project_id"), func.count(RoomStageEvent.id).label("revision_count"))
+        .join(Room, RoomStageEvent.room_id == Room.id)
+        .join(WorkflowStage, RoomStageEvent.to_stage_id == WorkflowStage.id)
+        .filter(WorkflowStage.key.in_(_REVISION_STAGE_KEYS))
+    )
+    if project_id is not None:
+        revision_query = revision_query.filter(Room.project_id == project_id)
+    if start_dt is not None:
+        revision_query = revision_query.filter(RoomStageEvent.created_at >= start_dt)
+    if end_dt is not None:
+        revision_query = revision_query.filter(RoomStageEvent.created_at < end_dt)
+    revision_counts = dict(revision_query.group_by(Room.project_id).all())
+
+    variation_query = db.query(
+        Comment.project_id.label("project_id"), func.count(Comment.id).label("variation_count")
+    ).filter(Comment.type == CommentType.VARIATION)
+    if project_id is not None:
+        variation_query = variation_query.filter(Comment.project_id == project_id)
+    if start_dt is not None:
+        variation_query = variation_query.filter(Comment.created_at >= start_dt)
+    if end_dt is not None:
+        variation_query = variation_query.filter(Comment.created_at < end_dt)
+    variation_counts = dict(variation_query.group_by(Comment.project_id).all())
+
+    project_ids = set(revision_counts) | set(variation_counts)
+    if not project_ids:
+        return []
+    projects = {p.id: p.name for p in db.query(Project.id, Project.name).filter(Project.id.in_(project_ids)).all()}
+
+    items = [
+        ReworkSummaryItem(
+            project_id=pid,
+            project_name=projects.get(pid, "—"),
+            revision_count=revision_counts.get(pid, 0),
+            variation_count=variation_counts.get(pid, 0),
+        )
+        for pid in project_ids
+    ]
+    items.sort(key=lambda i: (i.revision_count + i.variation_count), reverse=True)
+    return items
+
+
+@router.get("/batch-throughput", response_model=BatchThroughputReport)
+def batch_throughput(
+    project_id: int | None = None,
+    start: date | None = None,
+    end: date | None = None,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+) -> BatchThroughputReport:
+    """How many Batches reached `complete`, and the average creation-to-
+    completion time, within an optional date window. `Batch` has no dedicated
+    `completed_at` column — nothing updates a batch again once it's complete
+    (see app/api/routes/batches.py), so `updated_at` doubles as "when it
+    finished" here, the window filter applies to `updated_at` accordingly."""
+    query = db.query(Batch).filter(Batch.status == BatchStatus.COMPLETE)
+    if project_id is not None:
+        query = query.filter(Batch.project_id == project_id)
+    start_dt, end_dt = _period_bounds(start, end)
+    if start_dt is not None:
+        query = query.filter(Batch.updated_at >= start_dt)
+    if end_dt is not None:
+        query = query.filter(Batch.updated_at < end_dt)
+
+    batches = query.all()
+    if not batches:
+        return BatchThroughputReport(completed_count=0, avg_completion_hours=None)
+
+    durations_hours = [(b.updated_at - b.created_at).total_seconds() / 3600 for b in batches]
+    return BatchThroughputReport(
+        completed_count=len(batches),
+        avg_completion_hours=round(sum(durations_hours) / len(durations_hours), 1),
     )

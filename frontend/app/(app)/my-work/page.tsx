@@ -17,6 +17,7 @@ import {
   ROOM_WORKFLOW_STATUS_LABELS,
   ROOM_WORKFLOW_STATUS_VARIANTS,
   formatDate,
+  stageVariant,
 } from "@/lib/status";
 import type { Room, WorkflowStage } from "@/types";
 
@@ -73,9 +74,10 @@ function RoomRow({
           )}
           {room.name}
         </Link>
-        <p className="text-xs text-muted-foreground">
+        <p className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
           {room.project_name}
-          {room.apartment_name && <> · {room.apartment_name}</>} · {room.workflow_stage.name}
+          {room.apartment_name && <> · {room.apartment_name}</>} ·
+          <Badge variant={stageVariant(room.workflow_stage.key)}>{room.workflow_stage.name}</Badge>
         </p>
         {error && <p className="text-xs text-danger">{error}</p>}
       </div>

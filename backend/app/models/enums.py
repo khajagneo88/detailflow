@@ -11,7 +11,9 @@ class UserRole(str, enum.Enum):
     ADMIN = "admin"
     MANAGER = "manager"
     TEAM_LEADER = "team_leader"
+    PROJECT_MANAGER = "project_manager"
     DETAILER = "detailer"
+    NESTER = "nester"
 
 
 class Priority(str, enum.Enum):
@@ -67,11 +69,49 @@ class CommentType(str, enum.Enum):
     NOTE = "note"
     RFI = "rfi"
     BLOCKER = "blocker"
+    # A client-requested change logged after IFC Issued — mechanically the
+    # same loop-back as any other revision (IFC Issued -> IFC Revision ->
+    # IFC Drafted), just tagged distinctly for the record: "the client
+    # changed their mind after sign-off" rather than "we caught a mistake".
+    # Not restricted to any particular room stage at the API/schema level —
+    # same as NOTE/RFI/BLOCKER, a comment's type carries no stage-gating of
+    # its own (see app/api/routes/comments.py). See docs/ARCHITECTURE.md.
+    VARIATION = "variation"
 
 
 class CommentStatus(str, enum.Enum):
     OPEN = "open"
     RESOLVED = "resolved"
+
+
+class BatchStatus(str, enum.Enum):
+    """A Batch's own lightweight lifecycle — deliberately separate from the
+    room-level WorkflowStage/room_stage_events machinery (see
+    docs/ARCHITECTURE.md). `bom_review` is the Team Leader internal-review
+    gate between drafting the BOM and starting nesting; a Batch found to need
+    changes at that gate loops back to `bom_pending` rather than advancing."""
+
+    BOM_PENDING = "bom_pending"
+    BOM_REVIEW = "bom_review"
+    NESTING = "nesting"
+    COMPLETE = "complete"
+
+
+class NotificationType(str, enum.Enum):
+    """What a Notification is about. Kept as its own enum (rather than a
+    free-text `type` string) for the same reason every other small fixed set
+    in this codebase is an enum — see docs/ARCHITECTURE.md §11.5 for the
+    native-Postgres-enum gotcha to remember when a future notification type
+    is added here (an ALTER TYPE ... ADD VALUE migration, not autogenerate).
+
+    Only two members exist today — both project-manager-facing "this needs
+    to go to the client" moments — but nothing about the Notification model
+    or the notifications router assumes these are the only two types that
+    will ever exist; a future type (e.g. an RFI raised, a room gone blocked)
+    is just a new member plus whatever service call creates it."""
+
+    IFA_READY = "ifa_ready"
+    IFC_READY = "ifc_ready"
 
 
 class TimeEntrySource(str, enum.Enum):

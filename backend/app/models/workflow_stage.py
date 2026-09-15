@@ -9,35 +9,78 @@ from app.db.base_class import Base
 # without a schema change. See docs/ARCHITECTURE.md §8.
 #
 # Stages 1-4 are the modelling stages a detailer works through alone.
-# Stages 5-9 are the review/approval cycle (revised from the original
-# Team Leader Check/Corrections/Approved/BOM/Nesting/Drawings & Reports/
-# Ready for Production list to match the team's actual shop-drawing
-# submission process): a room is checked internally (Initial Review),
-# issued to the team leader/manager for sign-off (Issued for Approval),
-# reviewed by them (Internal Review), then the drawings are actually
-# submitted externally (Drawings Submitted). What comes back either
-# approves the room — moving it to Issued for Construction — or comes
-# back with markups, moving it to Revision, from which it re-enters
-# Drawings Submitted once fixed. See docs/ARCHITECTURE.md for the full
-# reasoning and the room_stage_events table that records each of these
-# transitions (with an outcome + note) rather than overwriting history.
 #
-# BOM and Nesting tracking are dropped from this fixed list for now —
-# they were always a future-roadmap item (never built), and reintroducing
-# them as their own stage(s) once that module exists is a pure data change
-# here plus a re-seed, not a schema change.
+# Stages 5-12 are the review/approval cycle, reshaped (as of the IFA/IFC
+# production-pipeline work) into two explicit named cycles instead of one
+# generic pass: IFA (Issued For Approval — the client-facing shop-drawing
+# package) and IFC (Issued For Construction — the package that's actually
+# built from), each with its own Team Leader internal-review gate and its
+# own revision loop-back. This replaced the previous single-pass list
+# (Initial Review -> Issued for Approval -> Internal Review -> Drawings
+# Submitted -> Revision/Issued for Construction) — that list's stages map
+# onto this one as: Initial Review + Issued for Approval -> IFA Drafted,
+# Internal Review -> IFA Internal Review, Drawings Submitted -> IFA Issued
+# (still the "outcome" decision point — see below), Revision -> IFA
+# Revision, and the old Issued for Construction stage no longer exists as
+# its own resting stage: the IFC cycle (IFC Drafted -> IFC Internal Review
+# -> IFC Issued) now carries that meaning, advancing straight to Complete
+# unless a revision is needed.
+#
+# Only IFA Issued carries a *required* client-approval gate (the
+# `StageTransitionOutcome` recorded on the RoomStageEvent when leaving this
+# stage — approved/approved_with_comments moves the room on to IFC Drafted,
+# markups_required moves it to IFA Revision) — this is the same mechanism
+# the old Drawings Submitted stage used, just retargeted. IFC Issued
+# deliberately does *not* require an outcome to proceed to Complete: client
+# involvement on an issued-for-construction package is optional/rare in
+# this team's process (a later "Variation" feature may still record an
+# outcome here when a client does request a late change, looping back to
+# IFC Revision — see room_service.transition_room_stage, which reads
+# to_stage.key generically rather than hardcoding "only IFA/IFC can loop
+# back", so that isn't blocked by anything here).
+#
+# A revision only resets the room to redrafting that specific package —
+# IFA Revision -> IFA Drafted, IFC Revision -> IFC Drafted — never back to
+# Final Detailing, matching how the single old Revision stage only ever
+# looped back to Drawings Submitted (never to Final Detailing) rather than
+# forcing the room to redo its 3D modelling.
+#
+# BOM, Nesting and Batch-level stages are deliberately NOT in this list —
+# per docs/ARCHITECTURE.md, those are being modelled as a separate
+# per-Batch entity in a later task, not as per-room workflow stages.
+# Reintroducing/adding any future stage here remains a pure data change
+# (this list + a re-seed) plus wiring, not a schema change, because stages
+# are rows in a lookup table, not an enum (§8).
+#
+# NOTE on how this data actually gets into the database: workflow_stages
+# has never been populated by an Alembic migration in this codebase (see
+# the initial-schema migration, which creates the *table* but inserts no
+# rows) — it's seeded/re-seeded exclusively by seed.py, and the stage
+# picker/re-seed pattern documented in §11.6/§18 assumes that. Rooms
+# reference stages by FK id, so simply changing this list and re-running
+# seed.py is destructive to any *real* (non-seed) room data pointing at
+# the old stage ids — acceptable here because this codebase has no
+# production data yet and seed.py already unconditionally clears and
+# recreates rooms/stages on every run (see seed.py's own comments). A
+# production rollout of this change would instead need a data migration
+# that inserts the new stage rows, remaps existing rooms' workflow_stage_id
+# from each old key to its new equivalent per the mapping above, and only
+# then removes the old rows — deliberately not attempted here since there's
+# nothing yet to migrate.
 DEFAULT_WORKFLOW_STAGES: list[dict] = [
     {"key": "setup", "name": "Setup", "sequence": 1},
     {"key": "modelling_3d", "name": "3D Modelling", "sequence": 2},
     {"key": "waiting_check_measure", "name": "Waiting for Check Measure", "sequence": 3},
     {"key": "final_detailing", "name": "Final Detailing", "sequence": 4},
-    {"key": "initial_review", "name": "Initial Review", "sequence": 5},
-    {"key": "issued_for_approval", "name": "Issued for Approval", "sequence": 6},
-    {"key": "internal_review", "name": "Internal Review", "sequence": 7},
-    {"key": "drawings_submitted", "name": "Drawings Submitted", "sequence": 8},
-    {"key": "revision", "name": "Revision", "sequence": 9},
-    {"key": "issued_for_construction", "name": "Issued for Construction", "sequence": 10},
-    {"key": "complete", "name": "Complete", "sequence": 11},
+    {"key": "ifa_drafted", "name": "IFA Drafted", "sequence": 5},
+    {"key": "ifa_internal_review", "name": "IFA Internal Review", "sequence": 6},
+    {"key": "ifa_issued", "name": "IFA Issued", "sequence": 7},
+    {"key": "ifa_revision", "name": "IFA Revision", "sequence": 8},
+    {"key": "ifc_drafted", "name": "IFC Drafted", "sequence": 9},
+    {"key": "ifc_internal_review", "name": "IFC Internal Review", "sequence": 10},
+    {"key": "ifc_issued", "name": "IFC Issued", "sequence": 11},
+    {"key": "ifc_revision", "name": "IFC Revision", "sequence": 12},
+    {"key": "complete", "name": "Complete", "sequence": 13},
 ]
 
 

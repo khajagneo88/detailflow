@@ -17,7 +17,6 @@ class Project(Base, TimestampMixin):
     client_name: Mapped[str | None] = mapped_column(String(255))
     builder: Mapped[str | None] = mapped_column(String(255))
     site_address: Mapped[str | None] = mapped_column(String(500))
-    project_manager: Mapped[str | None] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(Text)
 
     priority: Mapped[Priority] = mapped_column(
@@ -32,6 +31,13 @@ class Project(Base, TimestampMixin):
     team_leader_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL")
     )
+    # Was a free-text name column; now a real reference to a user (typically
+    # UserRole.PROJECT_MANAGER, though nothing enforces that role at the FK
+    # level, same as team_leader_id not enforcing UserRole.TEAM_LEADER). See
+    # docs/ARCHITECTURE.md §11 for the IFA/IFC pipeline this supports.
+    project_manager_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
 
     start_date: Mapped[date | None] = mapped_column(Date)
     detailing_due_date: Mapped[date | None] = mapped_column(Date)
@@ -43,6 +49,7 @@ class Project(Base, TimestampMixin):
     is_archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     team_leader = relationship("User", foreign_keys=[team_leader_id])
+    project_manager = relationship("User", foreign_keys=[project_manager_id])
     assignments = relationship(
         "ProjectAssignment", back_populates="project", cascade="all, delete-orphan"
     )
@@ -50,6 +57,7 @@ class Project(Base, TimestampMixin):
         "Apartment", back_populates="project", cascade="all, delete-orphan"
     )
     rooms = relationship("Room", back_populates="project", cascade="all, delete-orphan")
+    batches = relationship("Batch", back_populates="project", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"<Project {self.project_number} {self.name!r}>"

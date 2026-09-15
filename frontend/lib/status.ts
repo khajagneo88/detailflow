@@ -1,6 +1,7 @@
 import type { BadgeProps } from "@/components/ui/badge";
 import type {
   ApartmentStatus,
+  BatchStatus,
   CommentStatus,
   CommentType,
   Priority,
@@ -9,13 +10,16 @@ import type {
   StageTransitionOutcome,
   TimeEntrySource,
   UserRole,
+  WorkflowStageKey,
 } from "@/types";
 
 export const ROLE_LABELS: Record<UserRole, string> = {
   admin: "Admin",
   manager: "Manager",
   team_leader: "Team Leader",
+  project_manager: "Project Manager",
   detailer: "Detailer",
+  nester: "Nester",
 };
 
 /** Central label + colour mapping for every status/priority enum, so a
@@ -102,12 +106,18 @@ export const COMMENT_TYPE_LABELS: Record<CommentType, string> = {
   note: "Note",
   rfi: "RFI",
   blocker: "Blocker",
+  variation: "Variation",
 };
 
 export const COMMENT_TYPE_VARIANTS: Record<CommentType, BadgeProps["variant"]> = {
   note: "neutral",
   rfi: "info",
   blocker: "danger",
+  // Distinct from all three others (neutral/info/danger already taken) —
+  // a client-requested late change is notable but not a problem the way a
+  // blocker is, so it gets the one remaining variant rather than reusing
+  // blocker's red. See CommentType.VARIATION (app/models/enums.py).
+  variation: "warning",
 };
 
 export const COMMENT_STATUS_LABELS: Record<CommentStatus, string> = {
@@ -131,6 +141,86 @@ export const STAGE_OUTCOME_VARIANTS: Record<StageTransitionOutcome, BadgeProps["
   approved_with_comments: "info",
   markups_required: "danger",
 };
+
+/**
+ * Shared stage-metadata module (see docs/ARCHITECTURE.md §8 /
+ * workflow_stage.py's DEFAULT_WORKFLOW_STAGES for the fixed 13-stage list
+ * this mirrors). Room stage *names* already come straight from the API
+ * (WorkflowStage.name) and don't need a label map — this only supplies the
+ * color coding, which is otherwise pure frontend styling and appears
+ * nowhere in the backend response.
+ *
+ * Color scheme extends the app's existing 5-variant Badge palette by rough
+ * category, applied identically to both the IFA and IFC cycles (each is a
+ * full drafting -> review -> issued[-> revision] pass over the same
+ * package-in-progress, so they read the same way twice):
+ *  - neutral: pre-work (Setup)
+ *  - info (blue): active drafting work — 3D Modelling, Final Detailing,
+ *    IFA/IFC Drafted
+ *  - warning (amber): waiting on a review/check — Waiting for Check
+ *    Measure, IFA/IFC Internal Review
+ *  - success (green): issued to/ready for the client, or done — IFA/IFC
+ *    Issued, Complete
+ *  - danger (red): a revision loop-back — IFA/IFC Revision
+ */
+export const STAGE_VARIANTS: Record<WorkflowStageKey, BadgeProps["variant"]> = {
+  setup: "neutral",
+  modelling_3d: "info",
+  waiting_check_measure: "warning",
+  final_detailing: "info",
+  ifa_drafted: "info",
+  ifa_internal_review: "warning",
+  ifa_issued: "success",
+  ifa_revision: "danger",
+  ifc_drafted: "info",
+  ifc_internal_review: "warning",
+  ifc_issued: "success",
+  ifc_revision: "danger",
+  complete: "success",
+};
+
+/** Looks up a stage's color by key with a safe fallback — stage keys are
+ * rows in a backend lookup table, not a closed enum (see workflow_stage.py),
+ * so an environment seeded with a stage this map doesn't know about should
+ * degrade to a plain neutral badge rather than throwing. */
+export function stageVariant(key: string): BadgeProps["variant"] {
+  return (STAGE_VARIANTS as Record<string, BadgeProps["variant"]>)[key] ?? "neutral";
+}
+
+/**
+ * Batch lifecycle (app/models/enums.py::BatchStatus) — a Nester's own
+ * bom_pending -> bom_review -> nesting -> complete flow, separate from room
+ * WorkflowStage. Kept as its own Record (rather than folded into
+ * STAGE_VARIANTS above) since BatchStatus is a distinct closed backend enum
+ * with its own key space, not a WorkflowStageKey:
+ *  - info (blue): bom_pending — the Nester is drafting the BOM
+ *  - warning (amber): bom_review — the Team Leader review gate; a batch
+ *    found to need changes here loops back to bom_pending
+ *  - info (blue): nesting — active nesting work, same "in progress" color
+ *    as bom_pending since there's no distinct "nester-flavored" variant in
+ *    the app's 5-variant palette (neutral/success/warning/danger/info)
+ *  - success (green): complete
+ */
+export const BATCH_STATUS_LABELS: Record<BatchStatus, string> = {
+  bom_pending: "BOM Pending",
+  bom_review: "BOM Review",
+  nesting: "Nesting",
+  complete: "Complete",
+};
+
+export const BATCH_STATUS_VARIANTS: Record<BatchStatus, BadgeProps["variant"]> = {
+  bom_pending: "info",
+  bom_review: "warning",
+  nesting: "info",
+  complete: "success",
+};
+
+/** Looks up a batch status's color by key with a safe fallback — same
+ * defensive pattern as stageVariant() above, in case a future status value
+ * isn't in this map yet. */
+export function batchStatusVariant(status: string): BadgeProps["variant"] {
+  return (BATCH_STATUS_VARIANTS as Record<string, BadgeProps["variant"]>)[status] ?? "neutral";
+}
 
 export const TIME_ENTRY_SOURCE_LABELS: Record<TimeEntrySource, string> = {
   timer: "Timer",

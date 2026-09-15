@@ -46,20 +46,33 @@ export function compareRoomUrgency(a: Room, b: Room): number {
 }
 
 /** Where a detailer's simplified "Ready for Check" action goes next.
- * Almost always the immediate next stage in sequence, except Revision —
- * resubmitting after markups goes back to Drawings Submitted (sequence 8),
- * which is *earlier* than Revision (sequence 9), so it can't be derived
- * from sequence order alone. Shared by the room detail page and My Work. */
-export const NEXT_STAGE_OVERRIDES: Record<string, string> = { revision: "drawings_submitted" };
+ * Almost always the immediate next stage in sequence, except the two
+ * Revision stages — redrafting after markups goes back to that package's
+ * own Drafted stage (IFA Revision -> IFA Drafted, IFC Revision -> IFC
+ * Drafted, sequences 5/9), which is *earlier* than Revision itself
+ * (sequences 8/12), so it can't be derived from sequence order alone —
+ * mirrors the old single-cycle Revision -> Drawings Submitted override,
+ * now doubled across both cycles. See workflow_stage.py's DEFAULT_WORKFLOW_
+ * STAGES comment for the full old -> new stage mapping. Shared by the room
+ * detail page and My Work. */
+export const NEXT_STAGE_OVERRIDES: Record<string, string> = {
+  ifa_revision: "ifa_drafted",
+  ifc_revision: "ifc_drafted",
+};
 
 /** A room sitting in one of these is waiting on someone else (a reviewer,
- * or it's already done) — there's nothing for the detailer to click. */
+ * a client, or it's already done) — there's nothing for the detailer to
+ * click. Mirrors the room_status defaults room_service.transition_room_
+ * stage applies to the same stage keys (READY_FOR_REVIEW). The two Drafted
+ * stages are deliberately *not* here — that's the detailer's own active
+ * drafting work, same as the old Initial Review + Issued for Approval pair
+ * it replaces — nor are the Revision stages, which have their own override
+ * above regardless of this set. */
 export const WAITING_ON_SOMEONE_ELSE = new Set([
-  "initial_review",
-  "issued_for_approval",
-  "internal_review",
-  "drawings_submitted",
-  "issued_for_construction",
+  "ifa_internal_review",
+  "ifa_issued",
+  "ifc_internal_review",
+  "ifc_issued",
   "complete",
 ]);
 

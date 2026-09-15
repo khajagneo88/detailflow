@@ -52,3 +52,38 @@ export function formatWeekRange(mondayIso: string): string {
   });
   return `${startLabel} – ${endLabel}`;
 }
+
+/** The five business-day ISO dates (Monday-Friday) of the week starting on
+ * `mondayIso` — this is a cabinetry/joinery shop, not a 7-day operation, so
+ * the Planning grid only ever shows these five columns (see
+ * app/(app)/planning/page.tsx). */
+export function weekdayDates(mondayIso: string): string[] {
+  const dates: string[] = [];
+  for (let i = 0; i < 5; i++) {
+    dates.push(addDays(mondayIso, i));
+  }
+  return dates;
+}
+
+function addDays(isoDate: string, days: number): string {
+  const d = new Date(`${isoDate}T00:00:00`);
+  d.setDate(d.getDate() + days);
+  return toISODate(d);
+}
+
+/** "Mon, Sep 15" for a single day column heading. */
+export function formatDayHeading(isoDate: string): string {
+  const d = new Date(`${isoDate}T00:00:00`);
+  return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+}
+
+/** True once `isoDate` is strictly before today — the day-level equivalent
+ * of isPastWeek above, used to decide when a room-linked plan chip should
+ * show the worked/not-worked indicator (adapting §19's project/week
+ * green-red marking to a single day — see docs/ARCHITECTURE.md and
+ * app/services/plan_service.py::logged_minutes_map). Today itself is
+ * deliberately treated the same as a future day — not yet "over" — matching
+ * how the old feature never recoloured the current week's chips either. */
+export function isPastDay(isoDate: string): boolean {
+  return isoDate < toISODate(new Date());
+}

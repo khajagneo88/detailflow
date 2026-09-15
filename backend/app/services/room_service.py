@@ -5,11 +5,25 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.models.apartment import Apartment
-from app.models.enums import RoomWorkflowStatus, StageTransitionOutcome
+from app.models.enums import NotificationType, RoomWorkflowStatus, StageTransitionOutcome
+from app.models.notification import Notification
 from app.models.room import Room
 from app.models.room_stage_event import RoomStageEvent
 from app.models.user import User
 from app.models.workflow_stage import WorkflowStage
+
+# Stage key -> the NotificationType/title fired when a room transitions INTO
+# it, and to the project's project_manager_id specifically (the PM is the
+# one who needs to know a package is ready to submit to the client — see
+# docs/ARCHITECTURE.md's IFA/IFC pipeline section and Project.project_manager_id).
+# A dict, not two separate `if key == ...` branches, so a future third
+# "PM needs to know" checkpoint is one more entry here, not new branching
+# logic — same generic-over-stage-key style transition_room_stage already
+# uses for the revision/complete/ready_for_review status defaults above.
+_PM_NOTIFICATION_STAGES: dict[str, tuple[NotificationType, str]] = {
+    "ifa_issued": (NotificationType.IFA_READY, "IFA ready for client"),
+    "ifc_issued": (NotificationType.IFC_READY, "IFC ready for client"),
+}
 
 
 def assert_apartment_belongs_to_project(
@@ -42,6 +56,42 @@ def refresh_room_progress(db: Session, room: Room) -> None:
     room.progress = compute_progress(room.workflow_stage, total_stages)
 
 
+def _notify_project_manager_of_stage_readiness(db: Session, room: Room, to_stage: WorkflowStage) -> None:
+    """Fires a Notification for the project's PM when a room lands on one of
+    the client-ready checkpoints (see _PM_NOTIFICATION_STAGES). Called from
+    inside transition_room_stage — the one place a room's stage actually
+    changes — so this runs exactly once per transition, never on a plain
+    read of a room already sitting in ifa_issued/ifc_issued, and DOES fire
+    again on a repeat visit (e.g. after an IFA Revision loop-back and
+    resubmission): the PM genuinely needs to know each time a package is
+    ready to go out again, not just the first time. See docs/ARCHITECTURE.md.
+    """
+    entry = _PM_NOTIFICATION_STAGES.get(to_stage.key)
+    if entry is None:
+        return
+
+    project = room.project
+    if project is None or project.project_manager_id is None:
+        # No PM assigned to this project — nothing to notify, and this is
+        # not an error condition (plenty of projects may never get a PM).
+        return
+
+    notification_type, title = entry
+    package = "IFA" if notification_type == NotificationType.IFA_READY else "IFC"
+    body = f"Room {room.name} in {project.name} is ready to submit for {package} approval."
+
+    db.add(
+        Notification(
+            user_id=project.project_manager_id,
+            type=notification_type,
+            title=title,
+            body=body,
+            room_id=room.id,
+            project_id=project.id,
+        )
+    )
+
+
 def transition_room_stage(
     db: Session,
     room: Room,
@@ -70,26 +120,31 @@ def transition_room_stage(
     room.workflow_stage = to_stage
     refresh_room_progress(db, room)
 
-    # A room that lands back in Revision has changes required; one that's
-    # issued for construction or fully complete is done with this loop.
+    # A room that lands back in a Revision stage (IFA or IFC — generic on
+    # purpose, so a future loop-back target such as a "Variation" stage
+    # just needs adding to this tuple, not new branching logic) has changes
+    # required; one that reaches the terminal Complete stage is done.
     # Anything else just means work is under way. This is a convenience
     # default only — workflow_status can still be set independently via
     # PATCH /rooms/{id} (e.g. a detailer flagging themselves blocked).
-    if to_stage.key == "revision":
+    if to_stage.key in ("ifa_revision", "ifc_revision"):
         room.workflow_status = RoomWorkflowStatus.CHANGES_REQUIRED
-    elif to_stage.key in ("issued_for_construction", "complete"):
+    elif to_stage.key == "complete":
         room.workflow_status = RoomWorkflowStatus.COMPLETE
     elif to_stage.key in (
-        "initial_review",
-        "issued_for_approval",
-        "internal_review",
-        "drawings_submitted",
+        "ifa_internal_review",
+        "ifa_issued",
+        "ifc_internal_review",
+        "ifc_issued",
     ):
-        # Every checkpoint in the review cycle — including the two a
-        # detailer moves a room into directly (Initial Review, when their
-        # own modelling is done, and Drawings Submitted, on resubmission
-        # after a Revision) — reads as "waiting on someone else" rather
-        # than plain in_progress. See docs/ARCHITECTURE.md §12.1.
+        # Every review/issue checkpoint in the IFA and IFC cycles — the
+        # Team Leader review gates and the two "issued, PM notified"
+        # checkpoints — reads as "waiting on someone else" rather than
+        # plain in_progress. See docs/ARCHITECTURE.md §12.1 (the same
+        # convenience the old single-pass review cycle applied to its own
+        # four checkpoint stages).
         room.workflow_status = RoomWorkflowStatus.READY_FOR_REVIEW
+
+    _notify_project_manager_of_stage_readiness(db, room, to_stage)
 
     return event

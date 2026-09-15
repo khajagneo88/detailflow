@@ -2,6 +2,8 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
+from app.models.enums import ProjectStatus
+
 
 class ActiveTimerItem(BaseModel):
     """One row per currently-running timer, across every user — powers the
@@ -49,3 +51,56 @@ class TimeSummaryReport(BaseModel):
     rooms: list[RoomTimeSummaryItem]
     total_estimated_hours: float
     total_logged_hours: float
+
+
+class DetailerHoursItem(BaseModel):
+    """One row per user with any logged time in the requested window —
+    powers the Reports "Hours per detailer" ranked list (docs/ARCHITECTURE.md
+    §12.3's Reports section, extended). Users with nothing logged in the
+    window simply have no row, same "no row = nothing logged" convention as
+    WeeklyLoggedTimeItem above."""
+
+    user_id: int
+    full_name: str
+    logged_hours: float
+
+
+class ProjectBurnItem(BaseModel):
+    """Logged-vs-estimated hours for one active project — all-time totals,
+    not scoped to the hours/rework date range, since `estimated_hours` is a
+    single whole-project figure rather than a per-period one. A project with
+    no `estimated_hours` set still appears (estimated_hours: null) rather
+    than being dropped, matching RoomTimeSummaryItem's own "zero, not
+    missing" convention."""
+
+    project_id: int
+    project_name: str
+    status: ProjectStatus
+    estimated_hours: float | None
+    logged_hours: float
+
+
+class ReworkSummaryItem(BaseModel):
+    """Revision (a stage transition into ifa_revision/ifc_revision) and
+    Variation (a Comment with type=variation) counts for one project, within
+    the requested window — surfaces where rework is concentrated. Projects
+    with zero of both simply have no row."""
+
+    project_id: int
+    project_name: str
+    revision_count: int
+    variation_count: int
+
+
+class BatchThroughputReport(BaseModel):
+    """How many Batches reached `complete` in the requested window, and the
+    average creation-to-completion time across them (in hours) — `Batch` has
+    no dedicated `completed_at` column, so `updated_at` at the moment its
+    status last changed to `complete` is used as the completion timestamp
+    (nothing updates a completed batch afterwards — see app/models/batch.py).
+    `avg_completion_hours` is null when nothing completed in the window,
+    rather than zero, so the frontend can render "no batches completed" and
+    not a misleading 0h average."""
+
+    completed_count: int
+    avg_completion_hours: float | None

@@ -12,7 +12,7 @@ class ProjectBase(BaseModel):
     client_name: str | None = None
     builder: str | None = None
     site_address: str | None = None
-    project_manager: str | None = None
+    project_manager_id: int | None = None
     description: str | None = None
     priority: Priority = Priority.NORMAL
     status: ProjectStatus = ProjectStatus.NOT_STARTED
@@ -34,7 +34,7 @@ class ProjectUpdate(BaseModel):
     client_name: str | None = None
     builder: str | None = None
     site_address: str | None = None
-    project_manager: str | None = None
+    project_manager_id: int | None = None
     description: str | None = None
     priority: Priority | None = None
     status: ProjectStatus | None = None
@@ -76,7 +76,7 @@ class ProjectRead(BaseModel):
     client_name: str | None
     builder: str | None
     site_address: str | None
-    project_manager: str | None
+    project_manager: UserRead | None
     description: str | None
     priority: Priority
     status: ProjectStatus

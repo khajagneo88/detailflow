@@ -15,6 +15,7 @@ import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/features/auth/AuthContext";
+import { BatchesSection } from "@/features/batches/BatchesSection";
 import { BulkAddRoomsDialog } from "@/features/projects/BulkAddRoomsDialog";
 import { projectsApi } from "@/features/projects/api";
 import { RoomTable } from "@/features/projects/RoomTable";
@@ -37,6 +38,12 @@ import type { Apartment, Priority, Project, Room, User } from "@/types";
 // control that would just 403.
 const MANAGEMENT_ROLES = new Set(["admin", "manager", "team_leader"]);
 const ROOM_PRIORITIES: Priority[] = ["low", "normal", "high", "urgent"];
+
+// Batch creation and room add/remove are Nester-only on the backend
+// (require_nester — see app/api/routes/batches.py); everyone else sees the
+// Batches tab read-only, same "hide the control rather than show a 403"
+// convention as MANAGEMENT_ROLES above.
+const NESTER_ROLE = "nester";
 
 function StatRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -336,6 +343,7 @@ export default function ProjectDetailPage() {
   const projectId = Number(params.id);
   const { user } = useAuth();
   const canAdd = user !== null && MANAGEMENT_ROLES.has(user.role);
+  const canManageBatches = user !== null && user.role === NESTER_ROLE;
 
   const [project, setProject] = React.useState<Project | null>(null);
   const [apartments, setApartments] = React.useState<Apartment[] | null>(null);
@@ -409,6 +417,7 @@ export default function ProjectDetailPage() {
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="rooms">Apartments &amp; Rooms</TabsTrigger>
+          <TabsTrigger value="batches">Batches</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview">
@@ -421,7 +430,10 @@ export default function ProjectDetailPage() {
                 <StatRow label="Client" value={project.client_name ?? "—"} />
                 <StatRow label="Builder" value={project.builder ?? "—"} />
                 <StatRow label="Site address" value={project.site_address ?? "—"} />
-                <StatRow label="Project manager" value={project.project_manager ?? "—"} />
+                <StatRow
+                  label="Project manager"
+                  value={project.project_manager?.full_name ?? "—"}
+                />
                 <StatRow label="Team leader" value={project.team_leader?.full_name ?? "—"} />
                 <StatRow
                   label="Assigned detailers"
@@ -563,6 +575,10 @@ export default function ProjectDetailPage() {
               </Card>
             )}
           </div>
+        </TabsContent>
+
+        <TabsContent value="batches">
+          <BatchesSection projectId={project.id} canManage={canManageBatches} />
         </TabsContent>
       </Tabs>
 

@@ -41,6 +41,7 @@ def _room_query(db: Session):
         joinedload(Room.workflow_stage),
         joinedload(Room.apartment),
         joinedload(Room.project),
+        joinedload(Room.batch),
     )
 
 

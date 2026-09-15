@@ -2,9 +2,21 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict
 
-from app.models.enums import Priority, RoomWorkflowStatus
+from app.models.enums import BatchStatus, Priority, RoomWorkflowStatus
 from app.schemas.user import UserRead
 from app.schemas.workflow_stage import WorkflowStageRead
+
+
+class RoomBatchRead(BaseModel):
+    """Minimal batch info surfaced on a room — enough for the frontend to
+    show "Batch B-3 · Nesting" and link to it, without pulling in the full
+    BatchRead (room list, nester, etc.) that GET /batches/{id} returns."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    batch_number: int
+    status: BatchStatus
 
 
 class RoomBase(BaseModel):
@@ -60,5 +72,7 @@ class RoomRead(BaseModel):
     progress: int
     estimated_hours: float | None
     notes: str | None
+    batch_id: int | None = None
+    batch: RoomBatchRead | None = None
     created_at: datetime
     updated_at: datetime

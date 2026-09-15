@@ -38,7 +38,7 @@ export default function NewProjectPage() {
     client_name: "",
     builder: "",
     site_address: "",
-    project_manager: "",
+    project_manager_id: "",
     description: "",
     priority: "normal" as Priority,
     status: "not_started" as ProjectStatus,
@@ -56,6 +56,7 @@ export default function NewProjectPage() {
   }, []);
 
   const leaders = users?.filter((u) => u.role === "manager" || u.role === "team_leader") ?? [];
+  const projectManagers = users?.filter((u) => u.role === "project_manager") ?? [];
   const detailers = users?.filter((u) => u.role === "detailer") ?? [];
 
   function update<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
@@ -82,7 +83,7 @@ export default function NewProjectPage() {
         client_name: form.client_name || undefined,
         builder: form.builder || undefined,
         site_address: form.site_address || undefined,
-        project_manager: form.project_manager || undefined,
+        project_manager_id: form.project_manager_id ? Number(form.project_manager_id) : null,
         description: form.description || undefined,
         priority: form.priority,
         status: form.status,
@@ -159,11 +160,18 @@ export default function NewProjectPage() {
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="project_manager">Project manager</Label>
-              <Input
+              <Select
                 id="project_manager"
-                value={form.project_manager}
-                onChange={(e) => update("project_manager", e.target.value)}
-              />
+                value={form.project_manager_id}
+                onChange={(e) => update("project_manager_id", e.target.value)}
+              >
+                <option value="">Unassigned</option>
+                {projectManagers.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.full_name}
+                  </option>
+                ))}
+              </Select>
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="team_leader">Team leader</Label>

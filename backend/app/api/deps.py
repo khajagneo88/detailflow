@@ -81,3 +81,10 @@ def require_role(*allowed_roles: UserRole) -> Callable[[User], User]:
 # here as a tuple so every route that means "team-leader-or-above" imports
 # one name instead of the pair drifting out of sync across route files.
 MANAGEMENT_ROLES = (UserRole.MANAGER, UserRole.TEAM_LEADER)
+
+# Batch creation and membership changes are explicitly Nester-only per
+# product spec (unlike the room stage-transition endpoint, which has always
+# been left open — see app/api/routes/batches.py for why that precedent is
+# followed for the batch *status* transitions but not here). Admin still
+# bypasses via require_role()'s own rule.
+require_nester = require_role(UserRole.NESTER)

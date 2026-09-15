@@ -16,6 +16,7 @@ import {
   ROOM_WORKFLOW_STATUS_LABELS,
   ROOM_WORKFLOW_STATUS_VARIANTS,
   formatDate,
+  stageVariant,
 } from "@/lib/status";
 import type { Room } from "@/types";
 
@@ -79,7 +80,11 @@ export function RoomTable({
                 {room.assigned_detailer?.full_name ?? "Unassigned"}
               </TableCell>
             )}
-            <TableCell>{room.workflow_stage.name}</TableCell>
+            <TableCell>
+              <Badge variant={stageVariant(room.workflow_stage.key)}>
+                {room.workflow_stage.name}
+              </Badge>
+            </TableCell>
             <TableCell>
               <Badge variant={ROOM_WORKFLOW_STATUS_VARIANTS[room.workflow_status]}>
                 {ROOM_WORKFLOW_STATUS_LABELS[room.workflow_status]}

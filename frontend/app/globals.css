@@ -28,6 +28,30 @@
   --danger-bg: #fef2f2;
   --info: #0369a1; /* sky-700 */
   --info-bg: #f0f9ff;
+
+  /*
+   * Planning-grid task-category colours — see lib/plan-colors.ts. Deliberately
+   * a SEPARATE palette from the five semantic tokens above (success/warning/
+   * danger/info/neutral), which mean "state" (blocked, resolved, ...)
+   * elsewhere in the app. These mean "which production category is this
+   * task" — a literal purple/orange/green/yellow request from the product
+   * owner, not a status — so reusing e.g. --success for "BOM" would conflate
+   * two different questions a chip's colour could be answering. No dark-mode
+   * pair is defined here because this codebase has no dark-mode
+   * implementation anywhere yet (no `dark:` classes, no [data-theme], no
+   * prefers-color-scheme block in this file) — these tokens follow the same
+   * light-only pattern as every token above rather than introducing dark
+   * mode support in one corner of the app. Flagged in the delivery notes as
+   * a gap worth fixing app-wide, not patched locally here.
+   */
+  --plan-ifa: #7e22ce; /* purple-700 */
+  --plan-ifa-bg: #faf5ff; /* purple-50 */
+  --plan-ifc: #c2410c; /* orange-700 */
+  --plan-ifc-bg: #fff7ed; /* orange-50 */
+  --plan-bom: #15803d; /* green-700 */
+  --plan-bom-bg: #f0fdf4; /* green-50 */
+  --plan-nesting: #a16207; /* yellow-700 */
+  --plan-nesting-bg: #fefce8; /* yellow-50 */
 }
 
 @theme inline {
@@ -47,6 +71,14 @@
   --color-danger-bg: var(--danger-bg);
   --color-info: var(--info);
   --color-info-bg: var(--info-bg);
+  --color-plan-ifa: var(--plan-ifa);
+  --color-plan-ifa-bg: var(--plan-ifa-bg);
+  --color-plan-ifc: var(--plan-ifc);
+  --color-plan-ifc-bg: var(--plan-ifc-bg);
+  --color-plan-bom: var(--plan-bom);
+  --color-plan-bom-bg: var(--plan-bom-bg);
+  --color-plan-nesting: var(--plan-nesting);
+  --color-plan-nesting-bg: var(--plan-nesting-bg);
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
     sans-serif;
 }

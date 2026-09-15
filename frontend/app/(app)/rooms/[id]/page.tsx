@@ -25,6 +25,7 @@ import { Select } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/features/auth/AuthContext";
+import { batchesApi } from "@/features/batches/api";
 import { commentsApi, roomsApi, workflowStagesApi } from "@/features/rooms/api";
 import { timeEntriesApi } from "@/features/time-entries/api";
 import { useTimeTracking } from "@/features/time-entries/TimeTrackingContext";
@@ -32,6 +33,8 @@ import { ApiError } from "@/lib/api-client";
 import { WAITING_ON_SOMEONE_ELSE, getReadyForCheckTarget } from "@/lib/room-workflow";
 import { formatElapsed, minutesToHours, useElapsedSeconds } from "@/lib/time";
 import {
+  BATCH_STATUS_LABELS,
+  batchStatusVariant,
   COMMENT_STATUS_LABELS,
   COMMENT_STATUS_VARIANTS,
   COMMENT_TYPE_LABELS,
@@ -46,8 +49,10 @@ import {
   TIME_ENTRY_SOURCE_VARIANTS,
   formatDate,
   formatDateTime,
+  stageVariant,
 } from "@/lib/status";
 import type {
+  Batch,
   Comment,
   CommentType,
   Room,
@@ -62,12 +67,19 @@ import type {
 // app/api/routes/time_entries.py's _assert_can_modify.
 const MANAGEMENT_TIME_ROLES = new Set(["admin", "manager", "team_leader"]);
 
-// The one decision point in the fixed stage list where a room forks based on
-// what came back from the client/team leader — see workflow_stage.py on the
-// backend. Every other transition is a plain forward (or manual) move.
-const DECISION_STAGE_KEY = "drawings_submitted";
+// The one *required* decision point in the fixed stage list — a room here
+// forks based on what came back from the client. IFC Issued is deliberately
+// NOT a second required gate: client involvement after IFC is optional/rare
+// (see VariationLogger below) — see workflow_stage.py on the backend.
+// Every other transition is a plain forward (or manual) move.
+const DECISION_STAGE_KEY = "ifa_issued";
 
-const COMMENT_TYPES: CommentType[] = ["note", "rfi", "blocker"];
+// The one stage where a late, optional client change can be logged without
+// gating the normal forward transition to Complete — see workflow_stage.py's
+// DEFAULT_WORKFLOW_STAGES comment and VariationLogger below.
+const VARIATION_STAGE_KEY = "ifc_issued";
+
+const COMMENT_TYPES: CommentType[] = ["note", "rfi", "blocker", "variation"];
 const OUTCOMES: StageTransitionOutcome[] = ["approved", "approved_with_comments", "markups_required"];
 
 function StatRow({ label, value }: { label: string; value: React.ReactNode }) {
@@ -157,8 +169,8 @@ function StageTransitionCard({
                 ))}
               </Select>
               <p className="text-xs text-muted-foreground">
-                Drawings Submitted is the review checkpoint — record what came back before
-                moving on to Issued for Construction or Revision.
+                IFA Issued is the client-approval checkpoint — record what came back before
+                moving on to IFC Drafted or IFA Revision.
               </p>
             </div>
           )}
@@ -713,6 +725,14 @@ function CommentThreadCard({
   const [error, setError] = React.useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [busyId, setBusyId] = React.useState<number | null>(null);
+  const bodyRef = React.useRef<HTMLTextAreaElement>(null);
+
+  const isVariationEligible = room.workflow_stage.key === VARIATION_STAGE_KEY;
+
+  function startVariation() {
+    setType("variation");
+    bodyRef.current?.focus();
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -814,9 +834,25 @@ function CommentThreadCard({
           ))}
         </div>
 
+        {isVariationEligible && type !== "variation" && (
+          <button
+            type="button"
+            onClick={startVariation}
+            className="self-start text-xs font-medium text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground"
+          >
+            Log a late client change (Variation)
+          </button>
+        )}
+
         <Separator />
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+          {type === "variation" && (
+            <p className="rounded-md bg-warning-bg px-3 py-2 text-xs text-warning">
+              This won&apos;t block moving the room forward — it just records that the client
+              asked for a change after IFC Issued.
+            </p>
+          )}
           <div className="flex flex-col gap-1.5 sm:flex-row sm:items-end sm:gap-4">
             <div className="flex flex-1 flex-col gap-1.5">
               <Label htmlFor="comment-type">Type</Label>
@@ -847,6 +883,7 @@ function CommentThreadCard({
             </Label>
             <Textarea
               id="comment-body"
+              ref={bodyRef}
               rows={3}
               required
               value={body}
@@ -883,11 +920,13 @@ function StageHistoryCard({ events }: { events: RoomStageEvent[] }) {
                   <div className="flex flex-wrap items-center gap-1.5">
                     {event.from_stage && (
                       <>
-                        <span className="text-muted-foreground">{event.from_stage.name}</span>
+                        <Badge variant={stageVariant(event.from_stage.key)}>
+                          {event.from_stage.name}
+                        </Badge>
                         <ArrowRight className="h-3 w-3 text-muted-foreground" />
                       </>
                     )}
-                    <span className="font-medium">{event.to_stage.name}</span>
+                    <Badge variant={stageVariant(event.to_stage.key)}>{event.to_stage.name}</Badge>
                     {event.outcome && (
                       <Badge variant={STAGE_OUTCOME_VARIANTS[event.outcome]}>
                         {STAGE_OUTCOME_LABELS[event.outcome]}
@@ -919,6 +958,11 @@ export default function RoomDetailPage() {
   const [events, setEvents] = React.useState<RoomStageEvent[] | null>(null);
   const [comments, setComments] = React.useState<Comment[] | null>(null);
   const [entries, setEntries] = React.useState<TimeEntry[] | null>(null);
+  // undefined = not looked up yet; null = confirmed not in a batch. Looked
+  // up by scanning the project's batches for one that nests this room's id
+  // rather than trusting Room.batch_id — RoomRead doesn't serialize that
+  // field yet (see the JUDGMENT CALL comment on Room in types/index.ts).
+  const [batch, setBatch] = React.useState<Batch | null | undefined>(undefined);
   const [error, setError] = React.useState<string | null>(null);
 
   const load = React.useCallback(() => {
@@ -934,6 +978,10 @@ export default function RoomDetailPage() {
         setStages(s);
         setEvents(e);
         setEntries(te);
+        batchesApi
+          .listForProject(r.project_id)
+          .then((batches) => setBatch(batches.find((b) => b.rooms.some((br) => br.id === r.id)) ?? null))
+          .catch(() => setBatch(null)); // non-fatal — the batch info line just won't show
         return commentsApi.listForRoom(r.project_id, roomId);
       })
       .then(setComments)
@@ -969,7 +1017,14 @@ export default function RoomDetailPage() {
               <CardTitle className="text-sm font-semibold text-foreground">Overview</CardTitle>
             </CardHeader>
             <CardContent className="divide-y divide-border">
-              <StatRow label="Stage" value={room.workflow_stage.name} />
+              <StatRow
+                label="Stage"
+                value={
+                  <Badge variant={stageVariant(room.workflow_stage.key)}>
+                    {room.workflow_stage.name}
+                  </Badge>
+                }
+              />
               <StatRow
                 label="Status"
                 value={
@@ -986,6 +1041,22 @@ export default function RoomDetailPage() {
                   </Badge>
                 }
               />
+              {batch && (
+                <StatRow
+                  label="Batch"
+                  value={
+                    <Link
+                      href={`/batches/${batch.id}`}
+                      className="flex items-center gap-1.5 hover:text-primary hover:underline"
+                    >
+                      <span>Batch {batch.batch_number}</span>
+                      <Badge variant={batchStatusVariant(batch.status)}>
+                        {BATCH_STATUS_LABELS[batch.status]}
+                      </Badge>
+                    </Link>
+                  }
+                />
+              )}
               <StatRow label="Detailer" value={room.assigned_detailer?.full_name ?? "Unassigned"} />
               <StatRow label="Due date" value={formatDate(room.due_date)} />
               <StatRow label="Estimated hours" value={room.estimated_hours ?? "—"} />

@@ -29,7 +29,7 @@ export interface ProjectCreateInput {
   client_name?: string;
   builder?: string;
   site_address?: string;
-  project_manager?: string;
+  project_manager_id?: number | null;
   description?: string;
   priority: Priority;
   status: ProjectStatus;

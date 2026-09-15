@@ -57,6 +57,7 @@ def _to_read(db: Session, project: Project) -> ProjectRead:
 def _project_query(db: Session):
     return db.query(Project).options(
         joinedload(Project.team_leader),
+        joinedload(Project.project_manager),
         joinedload(Project.assignments).joinedload(ProjectAssignment.user),
     )
 

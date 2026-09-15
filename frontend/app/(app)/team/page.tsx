@@ -31,7 +31,14 @@ import { bucketFor, compareRoomUrgency } from "@/lib/room-workflow";
 import { ROLE_LABELS } from "@/lib/status";
 import type { ActiveTimerItem, Room, User, UserRole } from "@/types";
 
-const ROLE_OPTIONS: UserRole[] = ["admin", "manager", "team_leader", "detailer"];
+const ROLE_OPTIONS: UserRole[] = [
+  "admin",
+  "manager",
+  "team_leader",
+  "project_manager",
+  "detailer",
+  "nester",
+];
 
 /** One detailer's current (non-complete) jobs, sorted by urgency, plus a
  * quick attention/overdue count for the card header — everything a manager

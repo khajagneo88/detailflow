@@ -1,11 +1,23 @@
 import { apiClient } from "@/lib/api-client";
 import type {
   ActiveTimerItem,
+  BatchThroughputReport,
+  DetailerHoursItem,
+  ProjectBurnItem,
+  ReworkSummaryItem,
   Room,
   RoomWorkflowStatus,
   TimeSummaryReport,
   WeeklyLoggedTimeItem,
 } from "@/types";
+
+/** A selectable date window shared by the hours-per-detailer, rework, and
+ * batch-throughput metrics — reports.ts's own equivalent of the room
+ * table's project/stage filter row. `undefined` bounds mean "all time". */
+export interface ReportPeriod {
+  start?: string;
+  end?: string;
+}
 
 export interface StageSummaryItem {
   stage_key: string;
@@ -40,4 +52,18 @@ export const reportsApi = {
   activeTimers: () => apiClient.get<ActiveTimerItem[]>("/reports/active-timers"),
   timeLogged: (weekStart: string) =>
     apiClient.get<WeeklyLoggedTimeItem[]>(`/reports/time-logged?week_start=${weekStart}`),
+  detailerHours: (projectId?: string, period?: ReportPeriod) =>
+    apiClient.get<DetailerHoursItem[]>(
+      `/reports/detailer-hours${qs({ project_id: projectId, start: period?.start, end: period?.end })}`
+    ),
+  projectBurn: (projectId?: string) =>
+    apiClient.get<ProjectBurnItem[]>(`/reports/project-burn${qs({ project_id: projectId })}`),
+  reworkSummary: (projectId?: string, period?: ReportPeriod) =>
+    apiClient.get<ReworkSummaryItem[]>(
+      `/reports/rework-summary${qs({ project_id: projectId, start: period?.start, end: period?.end })}`
+    ),
+  batchThroughput: (projectId?: string, period?: ReportPeriod) =>
+    apiClient.get<BatchThroughputReport>(
+      `/reports/batch-throughput${qs({ project_id: projectId, start: period?.start, end: period?.end })}`
+    ),
 };

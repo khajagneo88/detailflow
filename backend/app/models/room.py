@@ -32,6 +32,16 @@ class Room(Base, TimestampMixin):
     assigned_detailer_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL")
     )
+    # Optional — a room joins a Batch only once it's IFC-approved (see
+    # app/services/batch_service.py::assert_rooms_batch_eligible), and only
+    # ever belongs to one active batch at a time. SET NULL rather than
+    # RESTRICT/CASCADE: a batch being removed (not offered in the API today,
+    # but the FK shouldn't assume it never will be) must not take the room
+    # down with it — the room just becomes unbatched again, same reasoning
+    # as assigned_detailer_id. See docs/ARCHITECTURE.md.
+    batch_id: Mapped[int | None] = mapped_column(
+        ForeignKey("batches.id", ondelete="SET NULL"), index=True
+    )
     priority: Mapped[Priority] = mapped_column(
         Enum(Priority, name="priority"), default=Priority.NORMAL, nullable=False
     )
@@ -56,6 +66,7 @@ class Room(Base, TimestampMixin):
     apartment = relationship("Apartment", back_populates="rooms")
     assigned_detailer = relationship("User", foreign_keys=[assigned_detailer_id])
     workflow_stage = relationship("WorkflowStage")
+    batch = relationship("Batch", back_populates="rooms")
     stage_events = relationship(
         "RoomStageEvent",
         back_populates="room",

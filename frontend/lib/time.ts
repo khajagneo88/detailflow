@@ -50,3 +50,18 @@ export function minutesToHours(minutes: number): number {
 export function formatHours(hours: number): string {
   return `${hours.toFixed(1)}h`;
 }
+
+/** "3m ago" / "5h ago" / "2d ago", falling back to a plain date once it's
+ * further back than that reads usefully — used by the notification
+ * dropdown (features/notifications). */
+export function formatRelativeTime(value: string): string {
+  const ms = Date.now() - new Date(value).getTime();
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(value).toLocaleDateString("en-AU", { day: "numeric", month: "short" });
+}

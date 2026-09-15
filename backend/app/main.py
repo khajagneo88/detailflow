@@ -4,7 +4,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import (
     apartments,
     auth,
+    batches,
     comments,
+    notifications,
     planning,
     projects,
     reports,
@@ -30,11 +32,13 @@ app.include_router(users.router, prefix="/api")
 app.include_router(projects.router, prefix="/api")
 app.include_router(apartments.router, prefix="/api")
 app.include_router(rooms.router, prefix="/api")
+app.include_router(batches.router, prefix="/api")
 app.include_router(comments.router, prefix="/api")
 app.include_router(time_entries.router, prefix="/api")
 app.include_router(workflow_stages.router, prefix="/api")
 app.include_router(reports.router, prefix="/api")
 app.include_router(planning.router, prefix="/api")
+app.include_router(notifications.router, prefix="/api")
 
 
 @app.get("/api/health", tags=["health"])
