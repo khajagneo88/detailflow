@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { UserPlus } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -295,6 +296,11 @@ export default function TeamPage() {
 
   const detailers = users?.filter((u) => u.role === "detailer") ?? [];
   const activeTimerUserIds = new Set(activeTimers.map((t) => t.user_id));
+  // One active job per detailer at most — enforced by the same
+  // one-running-timer-per-user constraint that backs "one active task per
+  // detailer" (docs/ARCHITECTURE.md §23.4) — so a plain by-user lookup
+  // never needs to pick between more than one entry.
+  const activeJobByUserId = new Map(activeTimers.map((t) => [t.user_id, t]));
 
   async function handleRoleChange(user: User, role: UserRole) {
     setSavingId(user.id);
@@ -355,6 +361,7 @@ export default function TeamPage() {
                     <TableHead>Email</TableHead>
                     <TableHead>Role</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>Currently working on</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -402,6 +409,27 @@ export default function TeamPage() {
                             {user.is_active ? "Active" : "Deactivated"}
                           </Badge>
                         )}
+                      </TableCell>
+                      <TableCell>
+                        {user.role !== "detailer" ? (
+                          <span className="text-muted-foreground">—</span>
+                        ) : (() => {
+                          const job = activeJobByUserId.get(user.id);
+                          if (!job) {
+                            return <span className="text-muted-foreground">Nothing right now</span>;
+                          }
+                          return (
+                            <Link
+                              href={`/rooms/${job.room_id}`}
+                              className="text-foreground hover:text-primary hover:underline"
+                            >
+                              {job.room_name}
+                              {job.project_name && (
+                                <span className="text-muted-foreground"> · {job.project_name}</span>
+                              )}
+                            </Link>
+                          );
+                        })()}
                       </TableCell>
                     </TableRow>
                   ))}
