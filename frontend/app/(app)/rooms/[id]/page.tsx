@@ -20,7 +20,7 @@ import { commentsApi, roomsApi, workflowStagesApi } from "@/features/rooms/api";
 import { RoomActions } from "@/features/rooms/RoomActions";
 import { timeEntriesApi } from "@/features/time-entries/api";
 import { ApiError } from "@/lib/api-client";
-import { minutesToHours } from "@/lib/time";
+import { allowedStageTransitions } from "@/lib/room-workflow";
 import {
   BATCH_STATUS_LABELS,
   batchStatusVariant,
@@ -40,6 +40,7 @@ import {
   formatDateTime,
   stageVariant,
 } from "@/lib/status";
+import { minutesToHours } from "@/lib/time";
 import type {
   Batch,
   Comment,
@@ -48,6 +49,7 @@ import type {
   RoomStageEvent,
   StageTransitionOutcome,
   TimeEntry,
+  UserRole,
   WorkflowStage,
 } from "@/types";
 
@@ -83,18 +85,37 @@ function StatRow({ label, value }: { label: string; value: React.ReactNode }) {
 function StageTransitionCard({
   room,
   stages,
+  role,
   onTransitioned,
 }: {
   room: Room;
   stages: WorkflowStage[];
+  role: UserRole | undefined;
   onTransitioned: (room: Room, event: RoomStageEvent) => void;
 }) {
-  const otherStages = stages.filter((s) => s.id !== room.workflow_stage.id);
+  // Only the stages `role` is actually allowed to move this room to from
+  // its current stage (see lib/room-workflow.ts::allowedStageTransitions,
+  // mirroring the backend's own per-transition role rules) — not "every
+  // other stage in the pipeline" like this picker used to offer.
+  const otherStages = React.useMemo(
+    () => allowedStageTransitions(room, role, stages),
+    [room, role, stages]
+  );
   const [toStageKey, setToStageKey] = React.useState(otherStages[0]?.key ?? "");
   const [outcome, setOutcome] = React.useState<StageTransitionOutcome | "">("");
   const [note, setNote] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
+
+  // The picker's selection can go stale when the room's own stage changes
+  // (e.g. right after a successful move) — reset to whatever's newly
+  // available rather than submitting a target that's no longer offered.
+  React.useEffect(() => {
+    if (!otherStages.some((s) => s.key === toStageKey)) {
+      setToStageKey(otherStages[0]?.key ?? "");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [otherStages]);
 
   const isDecisionPoint = room.workflow_stage.key === DECISION_STAGE_KEY;
 
@@ -118,6 +139,23 @@ function StageTransitionCard({
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  if (otherStages.length === 0) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-semibold text-foreground">Move stage</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">
+            {room.workflow_stage.key === "complete"
+              ? "This room is complete — nothing left to move."
+              : "Nothing for you to do here right now — this room is with someone else at this stage."}
+          </p>
+        </CardContent>
+      </Card>
+    );
   }
 
   return (
@@ -807,6 +845,7 @@ export default function RoomDetailPage() {
             <StageTransitionCard
               room={room}
               stages={stages}
+              role={user?.role}
               onTransitioned={(updatedRoom, event) => {
                 setRoom(updatedRoom);
                 setEvents((prev) => (prev ? [...prev, event] : [event]));

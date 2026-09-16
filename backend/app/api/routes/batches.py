@@ -190,17 +190,17 @@ def create_batch_status_transition(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> BatchRead:
-    """No role gate here — deliberately matching the precedent
-    POST /rooms/{id}/stage-transitions already set (see
-    app/api/routes/rooms.py / docs/ARCHITECTURE.md §12.1): that endpoint
-    has always been open to any authenticated user, with the frontend
-    responsible for only showing the right controls to the right role, so
-    this endpoint follows the same, already-established rule rather than
-    inventing stricter server-side enforcement that would be inconsistent
-    with the rest of the codebase. The Nester-only rule the product spec
-    calls out explicitly is enforced above, on batch creation and on
-    add/remove room membership — those are the two places the spec asks
-    for it."""
+    """No role gate here. POST /rooms/{id}/stage-transitions used to follow
+    this same "open to any authenticated user" rule, but as of §29
+    (docs/ARCHITECTURE.md) that endpoint gained real per-transition role
+    enforcement (app/services/room_service.py::assert_can_transition_stage)
+    — the product spec was explicit about who does each *room* review step,
+    but has never called out an equivalent per-role rule for a *batch*'s
+    own bom_pending/bom_review/nesting/complete lifecycle, so this endpoint
+    is left open deliberately rather than inventing a restriction nobody
+    asked for. The Nester-only rule the spec does call out explicitly is
+    enforced above, on batch creation and on add/remove room membership —
+    those are the two places the spec asks for it."""
     batch = _get_batch_or_404(db, batch_id)
 
     allowed = _ALLOWED_TRANSITIONS.get(batch.status, set())

@@ -1,4 +1,4 @@
-import type { Room, WorkflowStage } from "@/types";
+import type { Room, UserRole, WorkflowStage } from "@/types";
 
 /** Urgency bucket for a room, independent of whose "current jobs" list it's
  * shown in — used by My Work (bucketed for one detailer) and the Team page's
@@ -82,4 +82,51 @@ export function getReadyForCheckTarget(room: Room, stages: WorkflowStage[]): Wor
   if (targetKey) return stages.find((s) => s.key === targetKey) ?? null;
   if (WAITING_ON_SOMEONE_ELSE.has(currentKey)) return null;
   return stages.find((s) => s.sequence === room.workflow_stage.sequence + 1) ?? null;
+}
+
+/** Mirrors backend/app/services/room_service.py::_STAGE_TRANSITION_RULES —
+ * kept in sync by hand (see docs/ARCHITECTURE.md §29), same as every other
+ * pair of frontend/backend rule tables in this app. This is UI convenience
+ * only (which options to even offer, so a user doesn't hit a 403 by
+ * picking a stage they were never going to be allowed to move to) — the
+ * backend enforces the real rule regardless of what this table says.
+ *
+ * Three tiers:
+ *   - detailer: drafting and (re)submitting for review.
+ *   - management: the internal review gate (issue it, or send it back).
+ *   - client outcome: recording what the client said once issued.
+ * Admin and Team Leader implicitly pass every entry (matching the
+ * backend's own has_admin_bypass), so they're folded into every tier
+ * rather than repeated on each line. */
+const _DETAILER_ROLES: UserRole[] = ["detailer", "team_leader", "admin"];
+const _MANAGEMENT_ROLES: UserRole[] = ["manager", "team_leader", "admin"];
+const _CLIENT_OUTCOME_ROLES: UserRole[] = ["manager", "team_leader", "project_manager", "admin"];
+
+const STAGE_TRANSITION_RULES: Record<string, Record<string, UserRole[]>> = {
+  ifa_drafted: { ifa_internal_review: _DETAILER_ROLES },
+  ifa_internal_review: { ifa_issued: _MANAGEMENT_ROLES, ifa_drafted: _MANAGEMENT_ROLES },
+  ifa_issued: { ifc_drafted: _CLIENT_OUTCOME_ROLES, ifa_revision: _CLIENT_OUTCOME_ROLES },
+  ifa_revision: { ifa_drafted: _DETAILER_ROLES },
+  ifc_drafted: { ifc_internal_review: _DETAILER_ROLES },
+  ifc_internal_review: { ifc_issued: _MANAGEMENT_ROLES, ifc_drafted: _MANAGEMENT_ROLES },
+  ifc_issued: { complete: _CLIENT_OUTCOME_ROLES, ifc_revision: _CLIENT_OUTCOME_ROLES },
+  ifc_revision: { ifc_drafted: _DETAILER_ROLES },
+};
+
+/** Every stage `role` is currently allowed to move `room` into, given its
+ * current stage — powers the "Move stage" picker on the room detail page
+ * (StageTransitionCard) so a Manager/Team Leader/Project Manager/Nester/
+ * Admin only ever sees the options that actually apply right now, instead
+ * of every other stage in the whole pipeline. */
+export function allowedStageTransitions(
+  room: Room,
+  role: UserRole | undefined,
+  stages: WorkflowStage[]
+): WorkflowStage[] {
+  if (!role) return [];
+  const options = STAGE_TRANSITION_RULES[room.workflow_stage.key] ?? {};
+  return stages.filter((s) => {
+    const allowedRoles = options[s.key];
+    return allowedRoles !== undefined && allowedRoles.includes(role);
+  });
 }

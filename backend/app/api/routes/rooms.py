@@ -18,6 +18,7 @@ from app.schemas.room import RoomCreate, RoomRead, RoomStageTimelineItem, RoomUp
 from app.schemas.room_stage_event import RoomStageEventRead, StageTransitionRequest
 from app.services.room_service import (
     assert_apartment_belongs_to_project,
+    assert_can_transition_stage,
     refresh_room_progress,
     transition_room_stage,
 )
@@ -321,6 +322,8 @@ def create_stage_transition(
     to_stage = db.query(WorkflowStage).filter(WorkflowStage.key == payload.to_stage_key).first()
     if to_stage is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown workflow stage.")
+
+    assert_can_transition_stage(room.workflow_stage.key, to_stage.key, current_user)
 
     event = transition_room_stage(
         db,

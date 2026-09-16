@@ -65,6 +65,17 @@ def get_current_user(
 _ROLES_WITH_ADMIN_BYPASS = (UserRole.ADMIN, UserRole.TEAM_LEADER)
 
 
+def has_admin_bypass(role: UserRole) -> bool:
+    """Public accessor for _ROLES_WITH_ADMIN_BYPASS, for the rare case
+    (like app/services/room_service.py's per-stage-transition role check)
+    where the allowed-roles set for a check isn't known until *after* a
+    request body/DB row has been read — too late for a static
+    `Depends(require_role(...))` — so the caller has to do its own
+    `role in allowed_roles or has_admin_bypass(role)` check instead of
+    going through require_role()."""
+    return role in _ROLES_WITH_ADMIN_BYPASS
+
+
 def require_role(*allowed_roles: UserRole) -> Callable[[User], User]:
     """Usage: `current_user: User = Depends(require_role(UserRole.ADMIN, UserRole.TEAM_LEADER))`.
 

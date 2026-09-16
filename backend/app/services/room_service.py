@@ -4,8 +4,9 @@ must not be duplicated between the create and update endpoints.
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.api.deps import has_admin_bypass
 from app.models.apartment import Apartment
-from app.models.enums import NotificationType, RoomWorkflowStatus, StageTransitionOutcome
+from app.models.enums import NotificationType, RoomWorkflowStatus, StageTransitionOutcome, UserRole
 from app.models.notification import Notification
 from app.models.room import Room
 from app.models.room_stage_event import RoomStageEvent
@@ -25,6 +26,74 @@ _PM_NOTIFICATION_STAGES: dict[str, tuple[NotificationType, str]] = {
     "ifa_issued": (NotificationType.IFA_READY, "IFA ready for client"),
     "ifc_issued": (NotificationType.IFC_READY, "IFC ready for client"),
 }
+
+# Same pattern as _PM_NOTIFICATION_STAGES above, but for the project's
+# Team Leader (Project.team_leader_id) at the *other* checkpoint: the
+# moment a detailer submits a package for internal review, before it's
+# anywhere near client-ready. A product-owner ask (docs/ARCHITECTURE.md
+# §29) — previously nothing notified anyone when a room entered either
+# Internal Review stage.
+_TEAM_LEADER_NOTIFICATION_STAGES: dict[str, tuple[NotificationType, str]] = {
+    "ifa_internal_review": (NotificationType.IFA_REVIEW_REQUESTED, "IFA ready for your review"),
+    "ifc_internal_review": (NotificationType.IFC_REVIEW_REQUESTED, "IFC ready for your review"),
+}
+
+# Who may move a room FROM one stage TO another — checked by
+# assert_can_transition_stage below, called from the stage-transitions route
+# (not from transition_room_stage itself, so the batch-completion cascade's
+# own direct call — app/services/batch_service.py::complete_batch_rooms,
+# always to `complete`, always system-triggered off a Nester's own
+# already-gated batch action — is unaffected by this table). Admin and Team
+# Leader bypass every entry here too, via has_admin_bypass — same blanket
+# rule as require_role() elsewhere (app/api/deps.py), so this isn't a
+# second, inconsistent permission model, just one that has to be checked by
+# hand because the allowed-roles set depends on the room's *current* stage,
+# known only after it's been fetched — too late for a static
+# Depends(require_role(...)).
+#
+# Three tiers, matching docs/ARCHITECTURE.md §29:
+#   - DETAILER: drafting and (re)submitting — a detailer's own job.
+#   - _MANAGEMENT: the internal review gate — is this good enough to send
+#     to the client? Team Leader/Manager's call, either to issue it or send
+#     it back to the detailer for fixes.
+#   - _CLIENT_OUTCOME: recording what the client actually said once a
+#     package went out — Team Leader/Manager/Project Manager's call (the PM
+#     is often the one actually talking to the client).
+_MANAGEMENT = (UserRole.MANAGER, UserRole.TEAM_LEADER)
+_CLIENT_OUTCOME = (UserRole.MANAGER, UserRole.TEAM_LEADER, UserRole.PROJECT_MANAGER)
+
+_STAGE_TRANSITION_RULES: dict[tuple[str, str], tuple[UserRole, ...]] = {
+    ("ifa_drafted", "ifa_internal_review"): (UserRole.DETAILER,),
+    ("ifa_internal_review", "ifa_issued"): _MANAGEMENT,
+    ("ifa_internal_review", "ifa_drafted"): _MANAGEMENT,
+    ("ifa_issued", "ifc_drafted"): _CLIENT_OUTCOME,
+    ("ifa_issued", "ifa_revision"): _CLIENT_OUTCOME,
+    ("ifa_revision", "ifa_drafted"): (UserRole.DETAILER,),
+    ("ifc_drafted", "ifc_internal_review"): (UserRole.DETAILER,),
+    ("ifc_internal_review", "ifc_issued"): _MANAGEMENT,
+    ("ifc_internal_review", "ifc_drafted"): _MANAGEMENT,
+    ("ifc_issued", "complete"): _CLIENT_OUTCOME,
+    ("ifc_issued", "ifc_revision"): _CLIENT_OUTCOME,
+    ("ifc_revision", "ifc_drafted"): (UserRole.DETAILER,),
+}
+
+
+def assert_can_transition_stage(from_stage_key: str, to_stage_key: str, actor: User) -> None:
+    """Raises 403 unless `actor` is allowed to move a room from
+    `from_stage_key` to `to_stage_key` — see _STAGE_TRANSITION_RULES above.
+    A pair with no entry here (e.g. anything touching `complete` other than
+    ifc_issued -> complete, since nothing should freely move a room in or
+    out of the terminal stage by hand) is rejected outright, not silently
+    allowed — same "unknown means no" default the batch status-transition
+    map (app/api/routes/batches.py::_ALLOWED_TRANSITIONS) already uses."""
+    if has_admin_bypass(actor.role):
+        return
+    allowed_roles = _STAGE_TRANSITION_RULES.get((from_stage_key, to_stage_key), ())
+    if actor.role not in allowed_roles:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to move this room to that stage.",
+        )
 
 
 def assert_apartment_belongs_to_project(
@@ -93,6 +162,41 @@ def _notify_project_manager_of_stage_readiness(db: Session, room: Room, to_stage
     )
 
 
+def _notify_team_leader_of_review_request(db: Session, room: Room, to_stage: WorkflowStage) -> None:
+    """The Team Leader counterpart to _notify_project_manager_of_stage_
+    readiness above — fires when a detailer submits a room for internal
+    review (see _TEAM_LEADER_NOTIFICATION_STAGES), so the Team Leader knows
+    there's something to check without having to go looking for it. Same
+    "runs exactly once per transition, fires again on a resubmission"
+    behaviour as the PM notification, for the same reason: a Team Leader
+    needs to know each time, not just the first."""
+    entry = _TEAM_LEADER_NOTIFICATION_STAGES.get(to_stage.key)
+    if entry is None:
+        return
+
+    project = room.project
+    if project is None or project.team_leader_id is None:
+        # No Team Leader assigned to this project — nothing to notify, not
+        # an error condition, same "not every project has one" reasoning as
+        # the PM check above.
+        return
+
+    notification_type, title = entry
+    package = "IFA" if notification_type == NotificationType.IFA_REVIEW_REQUESTED else "IFC"
+    body = f"Room {room.name} in {project.name} was submitted for {package} internal review."
+
+    db.add(
+        Notification(
+            user_id=project.team_leader_id,
+            type=notification_type,
+            title=title,
+            body=body,
+            room_id=room.id,
+            project_id=project.id,
+        )
+    )
+
+
 def transition_room_stage(
     db: Session,
     room: Room,
@@ -147,6 +251,7 @@ def transition_room_stage(
         room.workflow_status = RoomWorkflowStatus.READY_FOR_REVIEW
 
     _notify_project_manager_of_stage_readiness(db, room, to_stage)
+    _notify_team_leader_of_review_request(db, room, to_stage)
 
     # Moving to a new stage — Next Stage, Submit IFA review, Submit IFC
     # review, all of which land here — always stops the acting detailer's

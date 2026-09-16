@@ -121,14 +121,19 @@ class NotificationType(str, enum.Enum):
     native-Postgres-enum gotcha to remember when a future notification type
     is added here (an ALTER TYPE ... ADD VALUE migration, not autogenerate).
 
-    Only two members exist today — both project-manager-facing "this needs
-    to go to the client" moments — but nothing about the Notification model
-    or the notifications router assumes these are the only two types that
-    will ever exist; a future type (e.g. an RFI raised, a room gone blocked)
-    is just a new member plus whatever service call creates it."""
+    Originally just two project-manager-facing "this needs to go to the
+    client" moments; extended with a second pair for the Team Leader's own
+    "please check this" moment when a detailer submits for internal review
+    (see room_service.py's _TEAM_LEADER_NOTIFICATION_STAGES) — nothing about
+    the Notification model or the notifications router assumes these four
+    are the only types that will ever exist; a future type (e.g. an RFI
+    raised, a room gone blocked) is just a new member plus whatever service
+    call creates it."""
 
     IFA_READY = "ifa_ready"
     IFC_READY = "ifc_ready"
+    IFA_REVIEW_REQUESTED = "ifa_review_requested"
+    IFC_REVIEW_REQUESTED = "ifc_review_requested"
 
 
 class TimeEntrySource(str, enum.Enum):
