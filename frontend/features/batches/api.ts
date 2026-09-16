@@ -28,4 +28,9 @@ export const batchesApi = {
     apiClient.patch<Batch>(`/batches/${batchId}/rooms`, input),
   createStatusTransition: (batchId: number, status: BatchStatus) =>
     apiClient.post<Batch>(`/batches/${batchId}/status-transitions`, { status }),
+  // "Start BOM" / "Start Nesting" — Nester-only, purely informational
+  // (Batch.bom_started_at/nesting_started_at), no status change. See
+  // docs/ARCHITECTURE.md §30.
+  startBom: (batchId: number) => apiClient.post<Batch>(`/batches/${batchId}/start-bom`, {}),
+  startNesting: (batchId: number) => apiClient.post<Batch>(`/batches/${batchId}/start-nesting`, {}),
 };

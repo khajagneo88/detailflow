@@ -42,6 +42,16 @@ function StatRow({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
+/** Six labelled actions total, matching the same "Start X / X Complete"
+ * naming the room detail page's Start IFA/IFA Complete/Start IFC/IFC
+ * Complete pair uses (§30) — but only four of the six change `status`:
+ * "Start BOM"/"Start Nesting" are the Nester recording *when* they
+ * actually began that phase (Batch.bom_started_at/nesting_started_at),
+ * with no transition of their own and no bearing on what else is
+ * clickable — a Nester can hit "BOM Complete" whether or not they ever
+ * clicked "Start BOM" first, same as a detailer can submit a room for
+ * review whether or not "Start" was ever clicked (docs/ARCHITECTURE.md
+ * §20/§23.3's "Start doubles as a convenience, not a gate" precedent). */
 function LifecycleControls({
   batch,
   canNester,
@@ -54,56 +64,102 @@ function LifecycleControls({
   onTransitioned: (batch: Batch) => void;
 }) {
   const [error, setError] = React.useState<string | null>(null);
-  const [busy, setBusy] = React.useState<BatchStatus | null>(null);
+  const [busy, setBusy] = React.useState<string | null>(null);
 
-  async function transition(status: BatchStatus) {
+  async function run(key: string, fn: () => Promise<Batch>, errorMessage: string) {
     setError(null);
-    setBusy(status);
+    setBusy(key);
     try {
-      const updated = await batchesApi.createStatusTransition(batch.id, status);
+      const updated = await fn();
       onTransitioned(updated);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to move the batch.");
+      setError(err instanceof ApiError ? err.message : errorMessage);
     } finally {
       setBusy(null);
     }
   }
 
-  const actions: { status: BatchStatus; label: string; icon: React.ReactNode; visible: boolean }[] = [
+  const transition = (status: BatchStatus) =>
+    run(status, () => batchesApi.createStatusTransition(batch.id, status), "Failed to move the batch.");
+
+  const actions: {
+    key: string;
+    label: string;
+    icon: React.ReactNode;
+    visible: boolean;
+    onClick: () => void;
+    warning?: boolean;
+  }[] = [
     {
-      status: "bom_review",
-      label: "Submit BOM for review",
+      key: "start-bom",
+      label: "Start BOM",
       icon: <PlayCircle className="h-4 w-4" />,
-      visible: batch.status === "bom_pending" && canNester,
+      visible: batch.status === "bom_pending" && canNester && !batch.bom_started_at,
+      onClick: () => run("start-bom", () => batchesApi.startBom(batch.id), "Failed to record BOM start."),
     },
     {
-      status: "nesting",
+      key: "bom_review",
+      label: "BOM Complete",
+      icon: <CheckCircle2 className="h-4 w-4" />,
+      visible: batch.status === "bom_pending" && canNester,
+      onClick: () => transition("bom_review"),
+    },
+    {
+      key: "nesting",
       label: "Approve — start nesting",
       icon: <CheckCircle2 className="h-4 w-4" />,
       visible: batch.status === "bom_review" && canReview,
+      onClick: () => transition("nesting"),
     },
     {
-      status: "bom_pending",
+      key: "bom_pending",
       label: "Send back — changes needed",
       icon: <Undo2 className="h-4 w-4" />,
       visible: batch.status === "bom_review" && canReview,
+      onClick: () => transition("bom_pending"),
+      warning: true,
     },
     {
-      status: "complete",
-      label: "Complete batch",
+      key: "start-nesting",
+      label: "Start Nesting",
+      icon: <PlayCircle className="h-4 w-4" />,
+      visible: batch.status === "nesting" && canNester && !batch.nesting_started_at,
+      onClick: () =>
+        run("start-nesting", () => batchesApi.startNesting(batch.id), "Failed to record nesting start."),
+    },
+    {
+      key: "complete",
+      label: "Nesting Complete",
       icon: <CheckCircle2 className="h-4 w-4" />,
       visible: batch.status === "nesting" && canNester,
+      onClick: () => transition("complete"),
     },
   ];
 
   const visibleActions = actions.filter((a) => a.visible);
 
+  const startedNotes = (
+    <>
+      {batch.bom_started_at && (
+        <p className="text-xs text-muted-foreground">BOM started {formatDateTime(batch.bom_started_at)}</p>
+      )}
+      {batch.nesting_started_at && (
+        <p className="text-xs text-muted-foreground">
+          Nesting started {formatDateTime(batch.nesting_started_at)}
+        </p>
+      )}
+    </>
+  );
+
   if (batch.status === "complete") {
     return (
       <Card>
-        <CardContent className="flex items-center gap-2 py-4 text-sm text-success">
-          <CheckCircle2 className="h-4 w-4" />
-          This batch is complete — every room in it has been moved to Complete.
+        <CardContent className="flex flex-col gap-2 py-4">
+          <p className="flex items-center gap-2 text-sm text-success">
+            <CheckCircle2 className="h-4 w-4" />
+            This batch is complete — every room in it has been moved to Complete.
+          </p>
+          {startedNotes}
         </CardContent>
       </Card>
     );
@@ -115,6 +171,7 @@ function LifecycleControls({
         <CardTitle className="text-sm font-semibold text-foreground">Status</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
+        {startedNotes}
         {visibleActions.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             {batch.status === "bom_pending" &&
@@ -126,16 +183,14 @@ function LifecycleControls({
         ) : (
           visibleActions.map((action) => (
             <Button
-              key={action.status}
-              onClick={() => transition(action.status)}
+              key={action.key}
+              onClick={action.onClick}
               disabled={busy !== null}
-              variant={action.status === "bom_pending" ? "outline" : "default"}
-              className={
-                action.status === "bom_pending" ? "border-warning/40 text-warning hover:bg-warning-bg" : ""
-              }
+              variant={action.warning ? "outline" : "default"}
+              className={action.warning ? "border-warning/40 text-warning hover:bg-warning-bg" : ""}
             >
               {action.icon}
-              {busy === action.status ? "Saving…" : action.label}
+              {busy === action.key ? "Saving…" : action.label}
             </Button>
           ))
         )}

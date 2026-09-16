@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
 
@@ -180,6 +182,53 @@ def update_batch_rooms(
         room.batch_id = None
 
     db.commit()
+    return _to_read(_get_batch_or_404(db, batch.id))
+
+
+@router.post("/batches/{batch_id}/start-bom", response_model=BatchRead)
+def start_batch_bom(
+    batch_id: int,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(require_nester),
+) -> BatchRead:
+    """Records when the Nester actually began BOM work — purely
+    informational (see Batch.bom_started_at's docstring and
+    docs/ARCHITECTURE.md §30); does not touch `status` and isn't a
+    prerequisite for "Submit BOM for review"/`start-nesting` below. Only
+    meaningful while the batch is still in BOM_PENDING (the phase this
+    timestamp is about) — 400 outside that, same "wrong state" signal
+    `create_batch_status_transition` already gives. Setting it a second
+    time is a harmless no-op rather than an error, since the frontend hides
+    the button once it's set but a stale tab could still resubmit."""
+    batch = _get_batch_or_404(db, batch_id)
+    if batch.status != BatchStatus.BOM_PENDING:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "This batch is no longer waiting on BOM."
+        )
+    if batch.bom_started_at is None:
+        batch.bom_started_at = datetime.now(timezone.utc)
+        db.commit()
+    return _to_read(_get_batch_or_404(db, batch.id))
+
+
+@router.post("/batches/{batch_id}/start-nesting", response_model=BatchRead)
+def start_batch_nesting(
+    batch_id: int,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(require_nester),
+) -> BatchRead:
+    """The Nesting-phase counterpart to start_batch_bom above — only
+    meaningful once a Team Leader/Manager/Admin has approved the batch into
+    NESTING (§21.4's bom_review->nesting gate); same "no prerequisite, no
+    status change, harmless to call twice" shape."""
+    batch = _get_batch_or_404(db, batch_id)
+    if batch.status != BatchStatus.NESTING:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "This batch is not in nesting."
+        )
+    if batch.nesting_started_at is None:
+        batch.nesting_started_at = datetime.now(timezone.utc)
+        db.commit()
     return _to_read(_get_batch_or_404(db, batch.id))
 
 

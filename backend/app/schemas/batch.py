@@ -57,5 +57,7 @@ class BatchRead(BaseModel):
     nester: UserRead
     room_count: int = 0
     rooms: list[BatchRoomSummary] = []
+    bom_started_at: datetime | None = None
+    nesting_started_at: datetime | None = None
     created_at: datetime
     updated_at: datetime

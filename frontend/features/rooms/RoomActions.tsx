@@ -16,13 +16,22 @@ import type { Comment, CommentType, Room, RoomStageEvent, WorkflowStage } from "
 /** "Ready for Check" always means the same click (move to the next stage in
  * sequence), but what that click actually *is* depends on where the room
  * sits right now — leaving Drafted for the matching Internal Review stage
- * is a review submission worth naming explicitly; every other forward move
- * is a generic "next stage." Shared by My Work and the room detail page so
- * the label is never a lie about what's about to happen. */
+ * is a review submission worth naming explicitly (labelled "IFA/IFC
+ * Complete," matching the "Start IFA/IFC" pairing below — §30); every other
+ * forward move is a generic "next stage." Shared by My Work and the room
+ * detail page so the label is never a lie about what's about to happen. */
 function nextStageLabel(targetKey: string, targetName: string): string {
-  if (targetKey === "ifa_internal_review") return "Submit IFA review";
-  if (targetKey === "ifc_internal_review") return "Submit IFC review";
+  if (targetKey === "ifa_internal_review") return "IFA Complete";
+  if (targetKey === "ifc_internal_review") return "IFC Complete";
   return `Next Stage (${targetName})`;
+}
+
+/** Which package a room's "Start" click is actually starting — every stage
+ * Start can ever show at (see showStart below: drafted or revision, for
+ * either cycle) belongs to exactly one of the two packages, so this is a
+ * plain prefix check on the stage key, not a lookup table. See §30. */
+function startLabel(stageKey: string): string {
+  return stageKey.startsWith("ifa") ? "Start IFA" : "Start IFC";
 }
 
 /**
@@ -130,7 +139,7 @@ export function RoomActions({
         {showStart && (
           <Button size="sm" onClick={handleStart} disabled={busy !== null}>
             <PlayCircle className="h-3.5 w-3.5" />
-            {busy === "start" ? "Starting…" : "Start"}
+            {busy === "start" ? "Starting…" : startLabel(room.workflow_stage.key)}
           </Button>
         )}
 

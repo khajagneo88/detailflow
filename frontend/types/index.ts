@@ -210,6 +210,8 @@ export interface Batch {
   nester: User;
   room_count: number;
   rooms: BatchRoomSummary[];
+  bom_started_at: string | null;
+  nesting_started_at: string | null;
   created_at: string;
   updated_at: string;
 }

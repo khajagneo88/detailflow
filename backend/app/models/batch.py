@@ -1,4 +1,6 @@
-from sqlalchemy import Enum, ForeignKey, Integer, UniqueConstraint
+from datetime import datetime
+
+from sqlalchemy import DateTime, Enum, ForeignKey, Integer, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base_class import Base, TimestampMixin
@@ -40,6 +42,19 @@ class Batch(Base, TimestampMixin):
     nester_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
+
+    # Purely informational timestamps the Nester sets by hand ("Start BOM" /
+    # "Start Nesting" — see docs/ARCHITECTURE.md §30) — unlike `status`,
+    # nothing else reads these to decide what a Nester or reviewer may do
+    # next; they exist only so the batch detail page can show *when* the
+    # Nester actually began each phase, since a batch already sits in
+    # BOM_PENDING (and later NESTING) automatically, with no status change
+    # of its own marking "and now I'm actually working on it." Both stay
+    # null until set, and are set at most once each (see routes.py) rather
+    # than reset on every status loop-back — a bom_review send-back doesn't
+    # erase when BOM work first started.
+    bom_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    nesting_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     project = relationship("Project", back_populates="batches")
     nester = relationship("User", foreign_keys=[nester_id])
