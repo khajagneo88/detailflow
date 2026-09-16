@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.api.deps import MANAGEMENT_ROLES, get_current_user, require_role
 from app.db.session import get_db
 from app.models.batch import Batch
-from app.models.enums import BatchStatus, Priority
+from app.models.enums import BatchStatus, Priority, UserRole
 from app.models.plan_entry import PlanEntry
 from app.models.room import Room
 from app.models.user import User
@@ -143,6 +143,27 @@ def eligible_tasks(
     )
 
 
+def _assert_task_matches_user_role(user: User, room: Room | None, batch: Batch | None) -> None:
+    """A plan entry's user and its task type have to agree on role — a Room
+    task is IFA/IFC drafting work, only ever a Detailer's job, and a Batch
+    task is BOM/Nesting, only ever a Nester's (docs/ARCHITECTURE.md
+    §21.4/§31). This isn't just a display nicety: creating a Room entry
+    also assigns `Room.assigned_detailer_id` to the entry's user
+    (plan_service.create_entry), so pointing a Room task at a Nester would
+    silently make them that room's detailer. Checked regardless of which
+    management role is doing the assigning — this is "does this task/
+    person pairing even make sense," not an authorization tier, so there's
+    no admin/Team-Leader bypass the way require_role() has one."""
+    if room is not None and user.role != UserRole.DETAILER:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "A room task can only be planned for a Detailer."
+        )
+    if batch is not None and user.role != UserRole.NESTER:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "A batch task can only be planned for a Nester."
+        )
+
+
 @router.post("/entries", response_model=PlanEntryRead, status_code=status.HTTP_201_CREATED)
 def create_plan_entry(
     payload: PlanEntryCreate,
@@ -178,6 +199,8 @@ def create_plan_entry(
         batch = db.get(Batch, payload.batch_id)
         if batch is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Batch not found.")
+
+    _assert_task_matches_user_role(user, room, batch)
 
     entry = create_entry(
         db,
@@ -224,6 +247,12 @@ def update_plan_entry(
         new_user = db.get(User, data["user_id"])
         if new_user is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found.")
+        # Dragging an entry onto a different person's row (or the "move"
+        # dropdown) can't change *what* the task is (PlanEntryUpdate has no
+        # room_id/batch_id of its own — see its docstring), only *who's*
+        # doing it — so re-check the same room-vs-Detailer/batch-vs-Nester
+        # pairing against the entry's existing (unchanged) task.
+        _assert_task_matches_user_role(new_user, entry.room, entry.batch)
 
     entry = update_entry(
         db,

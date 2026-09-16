@@ -26,6 +26,15 @@ import type { EligibleTasks, PlanEntry, User } from "@/types";
  * happens except two managers racing" precedent the old weekly plan page
  * used (docs/ARCHITECTURE.md §16.5) — the server still independently
  * re-checks on create.
+ *
+ * Rooms and Batches are also filtered by `detailer.role` (§31): a Detailer
+ * only ever drafts IFA/IFC, so only Rooms are offered; a Nester only ever
+ * works BOM/Nesting, so only Batches are offered — which, since a Batch
+ * can only be created from rooms that already reached IFC Issued (§21.4's
+ * eligibility check), is exactly "only IFC-completed jobs show for a
+ * Nester." The backend enforces the same pairing independently on create/
+ * move (app/api/routes/planning.py::_assert_task_matches_user_role) — this
+ * is just so the picker never offers something that would 400 anyway.
  */
 export function TaskPickerDialog({
   detailer,
@@ -50,8 +59,14 @@ export function TaskPickerDialog({
 
   const q = search.trim().toLowerCase();
 
-  const rooms = (eligibleTasks?.rooms ?? []).filter((r) => !plannedRoomIds.has(r.id));
-  const batches = (eligibleTasks?.batches ?? []).filter((b) => !plannedBatchIds.has(b.id));
+  const rooms =
+    detailer.role === "nester"
+      ? []
+      : (eligibleTasks?.rooms ?? []).filter((r) => !plannedRoomIds.has(r.id));
+  const batches =
+    detailer.role === "detailer"
+      ? []
+      : (eligibleTasks?.batches ?? []).filter((b) => !plannedBatchIds.has(b.id));
 
   const filteredRooms = q
     ? rooms.filter((r) =>
