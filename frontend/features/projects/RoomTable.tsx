@@ -2,6 +2,7 @@ import Link from "next/link";
 import { AlertTriangle } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { StageBadge } from "@/components/ui/stage-badge";
 import {
   Table,
   TableBody,
@@ -67,6 +68,7 @@ export function RoomTable({
                   <AlertTriangle className="h-3.5 w-3.5 text-danger" />
                 )}
                 {room.name}
+                <StageBadge room={room} />
               </Link>
             </TableCell>
             {showProject && (

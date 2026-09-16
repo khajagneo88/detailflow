@@ -76,3 +76,38 @@ class RoomRead(BaseModel):
     batch: RoomBatchRead | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class RoomStageTimelineItem(BaseModel):
+    """One row of the project detail page's Stage Timeline tab — per-room
+    IFA/IFC start/finish dates, revision counts, and where it stands with
+    its Batch (if any), all derived from RoomStageEvent history rather than
+    stored directly. See app/api/routes/rooms.py::project_room_stage_timeline
+    for how each field is computed, and docs/ARCHITECTURE.md §25."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    room_id: int
+    room_name: str
+    apartment_name: str | None
+    workflow_stage: WorkflowStageRead
+    workflow_status: RoomWorkflowStatus
+    # First time this room entered ifa_drafted — falls back to the room's
+    # created_at when no such event exists (the common case: a room's very
+    # first stage is never itself the target of a *transition* event, only
+    # a re-entry via IFA Revision would log one).
+    ifa_started_at: datetime
+    # First time this room left the IFA cycle into ifc_drafted (i.e. the
+    # client approved) — null if it hasn't gotten there yet.
+    ifa_completed_at: datetime | None
+    ifa_revision_count: int
+    # Same instant as ifa_completed_at when set (entering IFC IS leaving
+    # IFA) — kept as its own field for a self-explanatory column pair.
+    ifc_started_at: datetime | None
+    # First time this room reached ifc_issued — "IFC is ready", the point
+    # this team's process hands a room off to BOM/Nesting (see §24.1).
+    ifc_completed_at: datetime | None
+    ifc_revision_count: int
+    batch_id: int | None
+    batch_number: int | None
+    batch_status: BatchStatus | None

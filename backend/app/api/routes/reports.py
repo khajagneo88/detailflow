@@ -4,12 +4,19 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_role
 from app.api.routes.rooms import _room_query, _to_read
 from app.db.session import get_db
 from app.models.batch import Batch
 from app.models.comment import Comment
-from app.models.enums import BatchStatus, CommentStatus, CommentType, ProjectStatus, RoomWorkflowStatus
+from app.models.enums import (
+    BatchStatus,
+    CommentStatus,
+    CommentType,
+    ProjectStatus,
+    RoomWorkflowStatus,
+    UserRole,
+)
 from app.models.project import Project
 from app.models.room import Room
 from app.models.room_stage_event import RoomStageEvent
@@ -24,6 +31,7 @@ from app.schemas.report import (
     ReworkSummaryItem,
     RoomTimeSummaryItem,
     StageSummaryItem,
+    TimesheetEntryItem,
     TimeSummaryReport,
     WeeklyLoggedTimeItem,
 )
@@ -308,6 +316,72 @@ def detailer_hours(
         for row in rows
         if (row.logged_minutes or 0) > 0
     ]
+
+
+@router.get("/timesheet", response_model=list[TimesheetEntryItem])
+def timesheet(
+    start: date,
+    end: date,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(require_role(UserRole.ADMIN)),
+) -> list[TimesheetEntryItem]:
+    """Per-detailer, per-day, per-project logged time within [start, end] —
+    powers the Team page's Timesheet tab (docs/ARCHITECTURE.md §28): what
+    project a detailer worked on each day. Admin-only (Team Leader too, via
+    require_role()'s own _ROLES_WITH_ADMIN_BYPASS — app/api/deps.py) per
+    the product ask, unlike every other /reports read in this file, which
+    are all open to any authenticated user.
+
+    Scoped to UserRole.DETAILER — this is a *detailer* timesheet, not a
+    general one; a Nester's batch work has no room (and so no project) to
+    attribute a day to anyway (see plan_service.py::logged_minutes_map's
+    own note on this same gap).
+
+    Bucketed into calendar days in Python against UTC-normalised bounds,
+    same "don't depend on the DB session's timezone" precedent as
+    plan_service.py::logged_minutes_map, rather than a SQL func.date()
+    grouping. A detailer/day/project combination with nothing logged
+    simply has no row — same "no row = nothing logged" convention as
+    time_logged_for_week/detailer_hours above."""
+    start_dt = datetime.combine(start, time.min, tzinfo=timezone.utc)
+    end_dt = datetime.combine(end, time.min, tzinfo=timezone.utc) + timedelta(days=1)
+
+    rows = (
+        db.query(
+            TimeEntry.user_id,
+            User.full_name,
+            Room.project_id,
+            Project.name,
+            TimeEntry.started_at,
+            TimeEntry.duration_minutes,
+        )
+        .join(User, TimeEntry.user_id == User.id)
+        .join(Room, TimeEntry.room_id == Room.id)
+        .join(Project, Room.project_id == Project.id)
+        .filter(
+            User.role == UserRole.DETAILER,
+            TimeEntry.started_at >= start_dt,
+            TimeEntry.started_at < end_dt,
+        )
+        .all()
+    )
+
+    totals: dict[tuple[int, date, int], TimesheetEntryItem] = {}
+    for user_id, full_name, project_id, project_name, started_at, duration in rows:
+        day = started_at.astimezone(timezone.utc).date()
+        key = (user_id, day, project_id)
+        if key not in totals:
+            totals[key] = TimesheetEntryItem(
+                user_id=user_id,
+                full_name=full_name,
+                date=day,
+                project_id=project_id,
+                project_name=project_name,
+                logged_minutes=0,
+            )
+        totals[key].logged_minutes += duration or 0
+
+    return sorted(totals.values(), key=lambda item: (item.full_name, item.date, item.project_name))
 
 
 @router.get("/project-burn", response_model=list[ProjectBurnItem])

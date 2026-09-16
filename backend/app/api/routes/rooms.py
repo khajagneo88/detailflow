@@ -14,7 +14,7 @@ from app.models.room_stage_event import RoomStageEvent
 from app.models.time_entry import TimeEntry
 from app.models.user import User
 from app.models.workflow_stage import WorkflowStage
-from app.schemas.room import RoomCreate, RoomRead, RoomUpdate
+from app.schemas.room import RoomCreate, RoomRead, RoomStageTimelineItem, RoomUpdate
 from app.schemas.room_stage_event import RoomStageEventRead, StageTransitionRequest
 from app.services.room_service import (
     assert_apartment_belongs_to_project,
@@ -61,6 +61,82 @@ def list_rooms(
 ) -> list[RoomRead]:
     rooms = _room_query(db).filter(Room.project_id == project_id).all()
     return [_to_read(r) for r in rooms]
+
+
+@router.get(
+    "/projects/{project_id}/rooms/stage-timeline",
+    response_model=list[RoomStageTimelineItem],
+)
+def project_room_stage_timeline(
+    project_id: int,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+) -> list[RoomStageTimelineItem]:
+    """Powers the project detail page's Stage Timeline tab — one row per
+    room with IFA/IFC start/finish dates, revision counts, and Batch/BOM/
+    Nesting standing, all derived from this room's RoomStageEvent history
+    (see docs/ARCHITECTURE.md §25) rather than stored directly. Read-only,
+    open to any authenticated role, same as list_rooms above — this is a
+    view onto data every role can already see room-by-room, just rolled up.
+    """
+    rooms = _room_query(db).filter(Room.project_id == project_id).all()
+    room_ids = [r.id for r in rooms]
+
+    # One query for every room's history rather than one query per room —
+    # events ordered oldest-first so "the first event whose to_stage.key
+    # matches" (below) is always the *earliest* occurrence, not just any.
+    events = (
+        db.query(RoomStageEvent)
+        .options(joinedload(RoomStageEvent.to_stage))
+        .filter(RoomStageEvent.room_id.in_(room_ids))
+        .order_by(RoomStageEvent.created_at.asc())
+        .all()
+        if room_ids
+        else []
+    )
+    events_by_room: dict[int, list[RoomStageEvent]] = {}
+    for event in events:
+        events_by_room.setdefault(event.room_id, []).append(event)
+
+    items: list[RoomStageTimelineItem] = []
+    for room in rooms:
+        room_events = events_by_room.get(room.id, [])
+        ifa_completed_at = next(
+            (e.created_at for e in room_events if e.to_stage.key == "ifc_drafted"), None
+        )
+        ifc_completed_at = next(
+            (e.created_at for e in room_events if e.to_stage.key == "ifc_issued"), None
+        )
+        ifa_started_at = next(
+            (e.created_at for e in room_events if e.to_stage.key == "ifa_drafted"),
+            room.created_at,
+        )
+        ifa_revision_count = sum(1 for e in room_events if e.to_stage.key == "ifa_revision")
+        ifc_revision_count = sum(1 for e in room_events if e.to_stage.key == "ifc_revision")
+
+        items.append(
+            RoomStageTimelineItem(
+                room_id=room.id,
+                room_name=room.name,
+                apartment_name=room.apartment.name if room.apartment else None,
+                workflow_stage=room.workflow_stage,
+                workflow_status=room.workflow_status,
+                ifa_started_at=ifa_started_at,
+                ifa_completed_at=ifa_completed_at,
+                ifa_revision_count=ifa_revision_count,
+                ifc_started_at=ifa_completed_at,
+                ifc_completed_at=ifc_completed_at,
+                ifc_revision_count=ifc_revision_count,
+                batch_id=room.batch.id if room.batch else None,
+                batch_number=room.batch.batch_number if room.batch else None,
+                batch_status=room.batch.status if room.batch else None,
+            )
+        )
+
+    # Apartment, then room name — matches the Apartments & Rooms tab's own
+    # grouping so the two tabs read as the same room order.
+    items.sort(key=lambda i: (i.apartment_name or "", i.room_name))
+    return items
 
 
 @router.get("/rooms/mine", response_model=list[RoomRead])

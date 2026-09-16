@@ -23,6 +23,22 @@ export interface User {
   last_seen_at: string | null;
 }
 
+export type Weekday =
+  | "monday"
+  | "tuesday"
+  | "wednesday"
+  | "thursday"
+  | "friday"
+  | "saturday"
+  | "sunday";
+
+/** Mirrors app/schemas/settings.py::AppSettingsRead. The one workspace-wide
+ * setting so far — see lib/week.ts for how planning_week_start_day is
+ * turned into the Planning grid's actual columns. */
+export interface AppSettings {
+  planning_week_start_day: Weekday;
+}
+
 export type Priority = "low" | "normal" | "high" | "urgent";
 
 export type ProjectStatus =
@@ -159,19 +175,14 @@ export interface Room {
   notes: string | null;
   created_at: string;
   updated_at: string;
-  // JUDGMENT CALL: the backend Room model (app/models/room.py) has had a
-  // `batch_id` column since the Batch entity landed, but as of this build
-  // app/schemas/room.py::RoomRead does NOT actually declare/serialize a
-  // batch_id (or nested batch) field yet — verified by reading the schema
-  // directly rather than trusting that it was already wired up. Since we
-  // can't touch backend/ from here, this field is declared for type-fidelity
-  // with the model and to be forward-compatible the moment RoomRead adds it,
-  // but nothing in this frontend build actually relies on it coming back
-  // populated from GET /rooms/{id} or /projects/{id}/rooms — "which batch is
-  // this room in" is instead derived by cross-referencing the batches list
-  // for the room's project (BatchRead.rooms already nests real room ids), see
-  // features/batches/api.ts and the room-batch lookup in the room detail page.
   batch_id: number | null;
+  // Mirrors app/schemas/room.py::RoomBatchRead — RoomRead now does
+  // serialize this (verified directly in the schema, not just assumed),
+  // so a room's own batch status is available without cross-referencing
+  // the batches list. Used by lib/plan-colors.ts::roomCategory to show
+  // "BOM"/"Nesting" next to a batched room's name instead of freezing at
+  // its own (now-static) IFC Issued stage — see docs/ARCHITECTURE.md §24.
+  batch: { id: number; batch_number: number; status: BatchStatus } | null;
 }
 
 /** Mirrors app/schemas/batch.py. A Batch groups IFC-approved rooms (which
@@ -213,6 +224,26 @@ export interface RoomStageEvent {
   note: string | null;
   changed_by: User | null;
   created_at: string;
+}
+
+/** One row of the project detail page's Stage Timeline tab — mirrors
+ * app/schemas/room.py::RoomStageTimelineItem. See docs/ARCHITECTURE.md §25
+ * for how each date/count is derived from RoomStageEvent history. */
+export interface RoomStageTimelineItem {
+  room_id: number;
+  room_name: string;
+  apartment_name: string | null;
+  workflow_stage: WorkflowStage;
+  workflow_status: RoomWorkflowStatus;
+  ifa_started_at: string;
+  ifa_completed_at: string | null;
+  ifa_revision_count: number;
+  ifc_started_at: string | null;
+  ifc_completed_at: string | null;
+  ifc_revision_count: number;
+  batch_id: number | null;
+  batch_number: number | null;
+  batch_status: BatchStatus | null;
 }
 
 export type CommentType = "note" | "rfi" | "blocker" | "variation";
@@ -280,6 +311,18 @@ export interface ActiveTimerItem {
 export interface WeeklyLoggedTimeItem {
   user_id: number;
   project_id: number;
+  logged_minutes: number;
+}
+
+/** Mirrors app/schemas/report.py::TimesheetEntryItem — one row per
+ * (detailer, calendar day, project) with logged time, powering the Team
+ * page's admin-only Timesheet tab (docs/ARCHITECTURE.md §28). */
+export interface TimesheetEntryItem {
+  user_id: number;
+  full_name: string;
+  date: string;
+  project_id: number;
+  project_name: string;
   logged_minutes: number;
 }
 

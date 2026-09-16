@@ -138,10 +138,6 @@ def run() -> None:
         db.add_all([admin, manager, team_leader, project_manager_user, nester, sarah, john, mike])
         db.commit()
 
-        setup = stage_by_key(db, "setup")
-        modelling = stage_by_key(db, "modelling_3d")
-        check_measure = stage_by_key(db, "waiting_check_measure")
-        final_detailing = stage_by_key(db, "final_detailing")
         ifa_drafted = stage_by_key(db, "ifa_drafted")
         ifa_internal_review = stage_by_key(db, "ifa_internal_review")
         ifa_issued = stage_by_key(db, "ifa_issued")
@@ -217,11 +213,11 @@ def run() -> None:
                  workflow_status=RoomWorkflowStatus.COMPLETE,
                  due_date=TODAY - timedelta(days=2), estimated_hours=4),
             Room(project_id=richmond.id, apartment_id=apt_101.id, name="Ensuite",
-                 assigned_detailer_id=sarah.id, workflow_stage_id=final_detailing.id,
+                 assigned_detailer_id=sarah.id, workflow_stage_id=ifa_drafted.id,
                  workflow_status=RoomWorkflowStatus.IN_PROGRESS,
                  due_date=TODAY + timedelta(days=4), estimated_hours=6),
             Room(project_id=richmond.id, apartment_id=apt_101.id, name="Wardrobe",
-                 assigned_detailer_id=sarah.id, workflow_stage_id=modelling.id,
+                 assigned_detailer_id=sarah.id, workflow_stage_id=ifa_drafted.id,
                  workflow_status=RoomWorkflowStatus.NOT_STARTED,
                  due_date=TODAY + timedelta(days=6), estimated_hours=3),
             # Apartment 102 — kitchen came back with client markups, now in IFA Revision
@@ -234,28 +230,28 @@ def run() -> None:
                  workflow_status=RoomWorkflowStatus.READY_FOR_REVIEW,
                  due_date=TODAY + timedelta(days=1), estimated_hours=4),
             Room(project_id=richmond.id, apartment_id=apt_102.id, name="Ensuite",
-                 assigned_detailer_id=sarah.id, workflow_stage_id=modelling.id,
+                 assigned_detailer_id=sarah.id, workflow_stage_id=ifa_drafted.id,
                  workflow_status=RoomWorkflowStatus.IN_PROGRESS,
                  due_date=TODAY + timedelta(days=7), estimated_hours=6),
             Room(project_id=richmond.id, apartment_id=apt_102.id, name="Wardrobe",
-                 assigned_detailer_id=sarah.id, workflow_stage_id=setup.id,
+                 assigned_detailer_id=sarah.id, workflow_stage_id=ifa_drafted.id,
                  workflow_status=RoomWorkflowStatus.NOT_STARTED,
                  due_date=TODAY + timedelta(days=8), estimated_hours=3),
-            # Apartment 103 — waiting on check measure, blocked feel
+            # Apartment 103 — waiting on the client for information, blocked feel
             Room(project_id=richmond.id, apartment_id=apt_103.id, name="Kitchen",
-                 assigned_detailer_id=john.id, workflow_stage_id=check_measure.id,
+                 assigned_detailer_id=john.id, workflow_stage_id=ifa_drafted.id,
                  workflow_status=RoomWorkflowStatus.WAITING,
                  priority=Priority.URGENT, due_date=TODAY + timedelta(days=2), estimated_hours=14),
             Room(project_id=richmond.id, apartment_id=apt_103.id, name="Laundry",
-                 assigned_detailer_id=john.id, workflow_stage_id=check_measure.id,
+                 assigned_detailer_id=john.id, workflow_stage_id=ifa_drafted.id,
                  workflow_status=RoomWorkflowStatus.WAITING,
                  due_date=TODAY + timedelta(days=2), estimated_hours=4),
             Room(project_id=richmond.id, apartment_id=apt_103.id, name="Ensuite",
-                 assigned_detailer_id=john.id, workflow_stage_id=setup.id,
+                 assigned_detailer_id=john.id, workflow_stage_id=ifa_drafted.id,
                  workflow_status=RoomWorkflowStatus.NOT_STARTED,
                  due_date=TODAY + timedelta(days=9), estimated_hours=6),
             Room(project_id=richmond.id, apartment_id=apt_103.id, name="Wardrobe",
-                 assigned_detailer_id=john.id, workflow_stage_id=setup.id,
+                 assigned_detailer_id=john.id, workflow_stage_id=ifa_drafted.id,
                  workflow_status=RoomWorkflowStatus.NOT_STARTED,
                  due_date=TODAY + timedelta(days=9), estimated_hours=3),
         ]
@@ -291,16 +287,16 @@ def run() -> None:
 
         smith_rooms = [
             Room(project_id=smith.id, name="Kitchen", assigned_detailer_id=mike.id,
-                 workflow_stage_id=modelling.id, workflow_status=RoomWorkflowStatus.IN_PROGRESS,
+                 workflow_stage_id=ifa_drafted.id, workflow_status=RoomWorkflowStatus.IN_PROGRESS,
                  priority=Priority.HIGH, due_date=TODAY + timedelta(days=6), estimated_hours=16),
             Room(project_id=smith.id, name="Butler's Pantry", assigned_detailer_id=mike.id,
-                 workflow_stage_id=check_measure.id, workflow_status=RoomWorkflowStatus.WAITING,
+                 workflow_stage_id=ifa_drafted.id, workflow_status=RoomWorkflowStatus.WAITING,
                  due_date=TODAY + timedelta(days=10), estimated_hours=8),
             Room(project_id=smith.id, name="Laundry", assigned_detailer_id=mike.id,
                  workflow_stage_id=ifa_internal_review.id, workflow_status=RoomWorkflowStatus.READY_FOR_REVIEW,
                  due_date=TODAY + timedelta(days=4), estimated_hours=4),
             Room(project_id=smith.id, name="Walk-in Robe", assigned_detailer_id=mike.id,
-                 workflow_stage_id=setup.id, workflow_status=RoomWorkflowStatus.NOT_STARTED,
+                 workflow_stage_id=ifa_drafted.id, workflow_status=RoomWorkflowStatus.NOT_STARTED,
                  due_date=TODAY + timedelta(days=14), estimated_hours=5),
         ]
         db.add_all(smith_rooms)
@@ -375,19 +371,13 @@ def run() -> None:
             )
 
         # Apartment 101 Kitchen: clean run so far, currently in IFA Internal Review
-        add_event(apt101_kitchen, setup, modelling, sarah, 18)
-        add_event(apt101_kitchen, modelling, check_measure, sarah, 15)
-        add_event(apt101_kitchen, check_measure, final_detailing, sarah, 12)
-        add_event(apt101_kitchen, final_detailing, ifa_drafted, sarah, 6)
+        add_event(apt101_kitchen, None, ifa_drafted, sarah, 6)
         add_event(apt101_kitchen, ifa_drafted, ifa_internal_review, team_leader, 3)
 
         # Apartment 102 Kitchen: IFA went all the way out to the client and came
         # back with markups — sits in IFA Revision, looping back to IFA Drafted
-        # (redrafting the IFA package), not all the way to Final Detailing.
-        add_event(apt102_kitchen, setup, modelling, sarah, 25)
-        add_event(apt102_kitchen, modelling, check_measure, sarah, 22)
-        add_event(apt102_kitchen, check_measure, final_detailing, sarah, 18)
-        add_event(apt102_kitchen, final_detailing, ifa_drafted, sarah, 10)
+        # (redrafting the IFA package).
+        add_event(apt102_kitchen, None, ifa_drafted, sarah, 10)
         add_event(apt102_kitchen, ifa_drafted, ifa_internal_review, sarah, 9)
         add_event(
             apt102_kitchen, ifa_internal_review, ifa_issued, team_leader, 7,
@@ -403,10 +393,7 @@ def run() -> None:
         # Apartment 102 Laundry: sailed through both IFA and IFC review with no
         # markups and is now sitting at IFC Issued — PM notified, no client
         # gate required here, just waiting to be marked Complete.
-        add_event(apt102_laundry, setup, modelling, sarah, 30)
-        add_event(apt102_laundry, modelling, check_measure, sarah, 27)
-        add_event(apt102_laundry, check_measure, final_detailing, sarah, 23)
-        add_event(apt102_laundry, final_detailing, ifa_drafted, sarah, 16)
+        add_event(apt102_laundry, None, ifa_drafted, sarah, 16)
         add_event(apt102_laundry, ifa_drafted, ifa_internal_review, sarah, 14)
         add_event(
             apt102_laundry, ifa_internal_review, ifa_issued, team_leader, 13,
@@ -504,10 +491,7 @@ def run() -> None:
         # apt103 Ensuite: a full IFA->IFC pass that comes back as an IFC
         # Revision — a client-requested late change after sign-off, i.e. a
         # Variation (see docs/ARCHITECTURE.md §21.3), not a markup catch.
-        add_event(apt103_ensuite_room, setup, modelling, john, 40)
-        add_event(apt103_ensuite_room, modelling, check_measure, john, 36)
-        add_event(apt103_ensuite_room, check_measure, final_detailing, john, 32)
-        add_event(apt103_ensuite_room, final_detailing, ifa_drafted, john, 26)
+        add_event(apt103_ensuite_room, None, ifa_drafted, john, 26)
         add_event(apt103_ensuite_room, ifa_drafted, ifa_internal_review, team_leader, 24)
         add_event(
             apt103_ensuite_room, ifa_internal_review, ifa_issued, team_leader, 22,
@@ -542,10 +526,7 @@ def run() -> None:
 
         # Smith Walk-in Robe: an IFA revision loop (client markups on the
         # shelf configuration) — gives Smith its own revision, not just Richmond's.
-        add_event(smith_walkin_robe, setup, modelling, mike, 35)
-        add_event(smith_walkin_robe, modelling, check_measure, mike, 31)
-        add_event(smith_walkin_robe, check_measure, final_detailing, mike, 27)
-        add_event(smith_walkin_robe, final_detailing, ifa_drafted, mike, 20)
+        add_event(smith_walkin_robe, None, ifa_drafted, mike, 20)
         add_event(smith_walkin_robe, ifa_drafted, ifa_internal_review, team_leader, 18)
         add_event(
             smith_walkin_robe, ifa_internal_review, ifa_issued, team_leader, 16,
@@ -567,10 +548,7 @@ def run() -> None:
         # throughput a real completed batch (and a real creation->completion
         # duration) to report on, without touching richmond_batch/smith_batch
         # above (both still exactly as the Planning page's seed data expects).
-        add_event(apt103_wardrobe_room, setup, modelling, john, 45)
-        add_event(apt103_wardrobe_room, modelling, check_measure, john, 40)
-        add_event(apt103_wardrobe_room, check_measure, final_detailing, john, 36)
-        add_event(apt103_wardrobe_room, final_detailing, ifa_drafted, john, 30)
+        add_event(apt103_wardrobe_room, None, ifa_drafted, john, 30)
         add_event(apt103_wardrobe_room, ifa_drafted, ifa_internal_review, team_leader, 28)
         add_event(
             apt103_wardrobe_room, ifa_internal_review, ifa_issued, team_leader, 26,
@@ -668,8 +646,12 @@ def run() -> None:
             TODAY + timedelta(days=2),
             TODAY + timedelta(days=3),
         )
-        apt102_ensuite = richmond_rooms[6]  # modelling_3d — "New Project" (no colour)
-        apt101_wardrobe = richmond_rooms[3]  # modelling_3d — another "New Project" example
+        # ifa_drafted — every room starts life here now (§24 simplified away
+        # the old pre-drafting stages that used to render "New Project"/no
+        # colour on the Planning grid), so these are just two more purple
+        # IFA examples rather than a distinct category.
+        apt102_ensuite = richmond_rooms[6]
+        apt101_wardrobe = richmond_rooms[3]
         apt101_laundry = richmond_rooms[1]  # complete — the muted "done" treatment
 
         db.add_all(
@@ -686,8 +668,8 @@ def run() -> None:
                     user_id=john.id, date=monday, room_id=apt103_laundry.id, position=0,
                     created_by_id=team_leader.id,
                 ),
-                # Tuesday (today) — a fresh "New Project" (no colour) room each
-                # for Sarah and John, plus the Nester's own BOM batch task.
+                # Tuesday (today) — a fresh IFA-drafted room each for Sarah
+                # and John, plus the Nester's own BOM batch task.
                 PlanEntry(
                     user_id=sarah.id, date=tuesday, room_id=apt102_ensuite.id, position=0,
                     created_by_id=manager.id,
@@ -712,8 +694,8 @@ def run() -> None:
                     user_id=sarah.id, date=wednesday, room_id=apt101_laundry.id, position=1,
                     created_by_id=manager.id,
                 ),
-                # Thursday — Mike on the Smith kitchen (New Project), Noah on
-                # the Smith batch's Nesting task.
+                # Thursday — Mike on the Smith kitchen (IFA), Noah on the
+                # Smith batch's Nesting task.
                 PlanEntry(
                     user_id=mike.id, date=thursday, room_id=smith_rooms[0].id, position=0,
                     created_by_id=manager.id,

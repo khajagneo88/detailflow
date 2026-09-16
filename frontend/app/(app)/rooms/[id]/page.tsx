@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { StageBadge } from "@/components/ui/stage-badge";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/features/auth/AuthContext";
 import { batchesApi } from "@/features/batches/api";
@@ -705,7 +706,10 @@ export default function RoomDetailPage() {
           </Link>
           {room.apartment_name && <> · {room.apartment_name}</>}
         </p>
-        <h1 className="text-xl font-semibold tracking-tight">{room.name}</h1>
+        <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight">
+          {room.name}
+          <StageBadge room={room} />
+        </h1>
         {room.description && (
           <p className="text-sm text-muted-foreground">{room.description}</p>
         )}

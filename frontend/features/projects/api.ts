@@ -1,5 +1,13 @@
 import { apiClient } from "@/lib/api-client";
-import type { Apartment, Priority, Project, ProjectListItem, ProjectStatus, Room } from "@/types";
+import type {
+  Apartment,
+  Priority,
+  Project,
+  ProjectListItem,
+  ProjectStatus,
+  Room,
+  RoomStageTimelineItem,
+} from "@/types";
 
 export interface ApartmentCreateInput {
   name: string;
@@ -63,6 +71,10 @@ export const projectsApi = {
   listApartments: (projectId: number) =>
     apiClient.get<Apartment[]>(`/projects/${projectId}/apartments`),
   listRooms: (projectId: number) => apiClient.get<Room[]>(`/projects/${projectId}/rooms`),
+  // Powers the project detail page's Stage Timeline tab — see
+  // docs/ARCHITECTURE.md §25.
+  stageTimeline: (projectId: number) =>
+    apiClient.get<RoomStageTimelineItem[]>(`/projects/${projectId}/rooms/stage-timeline`),
   createApartment: (projectId: number, input: ApartmentCreateInput) =>
     apiClient.post<Apartment>(`/projects/${projectId}/apartments`, input),
   createRoom: (projectId: number, input: RoomCreateInput) =>

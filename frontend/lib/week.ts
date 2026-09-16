@@ -1,9 +1,35 @@
-/** Small date-math helpers for the Planning page — kept separate from
- * lib/status.ts's formatDate() since these are about picking/labelling a
- * *week*, not formatting a single date. Mirrors the server's own week
- * normalisation (app/services/weekly_plan_service.py::monday_of) so the
- * displayed week always matches what a create call would actually save
- * against. */
+import type { Weekday } from "@/types";
+
+/** Small date-math helpers for the Planning page. Every function that needs
+ * to know which day "a week" starts on takes it as a `Weekday` parameter
+ * rather than assuming Monday (or any other fixed day) — that day is an
+ * admin-configurable workspace setting (AppSettings.planning_week_start_day,
+ * see features/settings/api.ts), not a constant, so the Planning page reads
+ * it once and threads it through everywhere below. */
+
+// Maps onto JS's own Date.getDay() convention (0 = Sunday ... 6 = Saturday)
+// at the one place that needs an actual index — everywhere else in this
+// app just passes the Weekday string straight through.
+const WEEKDAY_TO_JS_DAY: Record<Weekday, number> = {
+  sunday: 0,
+  monday: 1,
+  tuesday: 2,
+  wednesday: 3,
+  thursday: 4,
+  friday: 5,
+  saturday: 6,
+};
+
+/** All 7 weekdays, Monday-first, for populating a settings dropdown. */
+export const WEEKDAY_OPTIONS: { value: Weekday; label: string }[] = [
+  { value: "monday", label: "Monday" },
+  { value: "tuesday", label: "Tuesday" },
+  { value: "wednesday", label: "Wednesday" },
+  { value: "thursday", label: "Thursday" },
+  { value: "friday", label: "Friday" },
+  { value: "saturday", label: "Saturday" },
+  { value: "sunday", label: "Sunday" },
+];
 
 function toISODate(d: Date): string {
   const year = d.getFullYear();
@@ -12,35 +38,40 @@ function toISODate(d: Date): string {
   return `${year}-${month}-${day}`;
 }
 
-/** Monday of the week containing `isoDate` (or today, if omitted), as an
- * ISO date string — matching the backend's Monday-based normalisation. */
-export function mondayOf(isoDate?: string): string {
+function addDays(isoDate: string, days: number): string {
+  const d = new Date(`${isoDate}T00:00:00`);
+  d.setDate(d.getDate() + days);
+  return toISODate(d);
+}
+
+/** The most recent occurrence of `anchorWeekday` on or before `isoDate` (or
+ * today, if omitted), as an ISO date string — i.e. the first day of the
+ * week containing that date, given the configured anchor. */
+export function weekStartOf(anchorWeekday: Weekday, isoDate?: string): string {
   const d = isoDate ? new Date(`${isoDate}T00:00:00`) : new Date();
-  const dayOfWeek = d.getDay(); // 0 = Sunday, 1 = Monday, ...
-  const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-  d.setDate(d.getDate() + diff);
+  const anchorDay = WEEKDAY_TO_JS_DAY[anchorWeekday];
+  const diff = (d.getDay() - anchorDay + 7) % 7;
+  d.setDate(d.getDate() - diff);
   return toISODate(d);
 }
 
-export function addWeeks(mondayIso: string, weeks: number): string {
-  const d = new Date(`${mondayIso}T00:00:00`);
-  d.setDate(d.getDate() + weeks * 7);
-  return toISODate(d);
+export function addWeeks(weekStartIso: string, weeks: number): string {
+  return addDays(weekStartIso, weeks * 7);
 }
 
-/** True once a week is fully over — i.e. its Monday is before this week's
- * Monday. Weeks are always Monday-aligned (mondayOf), so comparing the
- * ISO date strings directly is a valid chronological comparison. Used to
- * decide when the Planning page starts marking plan items green/red
- * (§19) instead of leaving them neutral — nothing to judge yet for the
- * current or a future week. */
-export function isPastWeek(mondayIso: string): boolean {
-  return mondayIso < mondayOf();
+/** True once a week is fully over — i.e. its start is before the current
+ * week's start under the same anchor day. Weeks are always aligned to
+ * `anchorWeekday` (weekStartOf), so comparing the ISO date strings directly
+ * is a valid chronological comparison. Used to decide when the Planning
+ * page starts marking plan items green/red (§19) instead of leaving them
+ * neutral — nothing to judge yet for the current or a future week. */
+export function isPastWeek(weekStartIso: string, anchorWeekday: Weekday): boolean {
+  return weekStartIso < weekStartOf(anchorWeekday);
 }
 
-/** "Sep 7 – Sep 13, 2026" for the week starting on `mondayIso`. */
-export function formatWeekRange(mondayIso: string): string {
-  const start = new Date(`${mondayIso}T00:00:00`);
+/** "Sep 7 – Sep 13, 2026" for the 7-day week starting on `weekStartIso`. */
+export function formatWeekRange(weekStartIso: string): string {
+  const start = new Date(`${weekStartIso}T00:00:00`);
   const end = new Date(start);
   end.setDate(end.getDate() + 6);
 
@@ -53,22 +84,22 @@ export function formatWeekRange(mondayIso: string): string {
   return `${startLabel} – ${endLabel}`;
 }
 
-/** The five business-day ISO dates (Monday-Friday) of the week starting on
- * `mondayIso` — this is a cabinetry/joinery shop, not a 7-day operation, so
- * the Planning grid only ever shows these five columns (see
- * app/(app)/planning/page.tsx). */
-export function weekdayDates(mondayIso: string): string[] {
+/** The five business-day ISO dates within the 7-day week starting on
+ * `weekStartIso`, in chronological order — this is a cabinetry/joinery
+ * shop, not a 7-day operation, so the Planning grid only ever shows these
+ * five columns (see app/(app)/planning/page.tsx). Any 7-day span contains
+ * exactly 5 weekdays regardless of which day it starts on, so this holds
+ * for whatever anchor day AppSettings.planning_week_start_day is currently
+ * set to — e.g. a Tuesday-anchored week shows Tue/Wed/Thu/Fri/Mon, skipping
+ * the Sat/Sun in between. */
+export function weekdayDates(weekStartIso: string): string[] {
   const dates: string[] = [];
-  for (let i = 0; i < 5; i++) {
-    dates.push(addDays(mondayIso, i));
+  for (let offset = 0; dates.length < 5 && offset < 7; offset++) {
+    const iso = addDays(weekStartIso, offset);
+    const dayOfWeek = new Date(`${iso}T00:00:00`).getDay();
+    if (dayOfWeek !== 0 && dayOfWeek !== 6) dates.push(iso);
   }
   return dates;
-}
-
-function addDays(isoDate: string, days: number): string {
-  const d = new Date(`${isoDate}T00:00:00`);
-  d.setDate(d.getDate() + days);
-  return toISODate(d);
 }
 
 /** "Mon, Sep 15" for a single day column heading. */

@@ -7,6 +7,7 @@ import type {
   ReworkSummaryItem,
   Room,
   RoomWorkflowStatus,
+  TimesheetEntryItem,
   TimeSummaryReport,
   WeeklyLoggedTimeItem,
 } from "@/types";
@@ -52,6 +53,11 @@ export const reportsApi = {
   activeTimers: () => apiClient.get<ActiveTimerItem[]>("/reports/active-timers"),
   timeLogged: (weekStart: string) =>
     apiClient.get<WeeklyLoggedTimeItem[]>(`/reports/time-logged?week_start=${weekStart}`),
+  /** Admin-only on the backend (Team Leader too, via its own admin bypass)
+   * — powers the Team page's Timesheet tab. `start`/`end` are inclusive
+   * calendar dates. */
+  timesheet: (start: string, end: string) =>
+    apiClient.get<TimesheetEntryItem[]>(`/reports/timesheet${qs({ start, end })}`),
   detailerHours: (projectId?: string, period?: ReportPeriod) =>
     apiClient.get<DetailerHoursItem[]>(
       `/reports/detailer-hours${qs({ project_id: projectId, start: period?.start, end: period?.end })}`

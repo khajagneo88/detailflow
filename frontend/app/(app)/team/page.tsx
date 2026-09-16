@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { UserPlus } from "lucide-react";
+import { ChevronLeft, ChevronRight, UserPlus } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,12 +25,16 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/features/auth/AuthContext";
 import { reportsApi } from "@/features/reports/api";
 import { RoomTable } from "@/features/projects/RoomTable";
+import { settingsApi } from "@/features/settings/api";
 import { usersApi } from "@/features/users/api";
 import { ApiError } from "@/lib/api-client";
 import { presenceStatus } from "@/lib/presence";
+import { canManageAdminSettings } from "@/lib/roles";
 import { bucketFor, compareRoomUrgency } from "@/lib/room-workflow";
 import { ROLE_LABELS } from "@/lib/status";
-import type { ActiveTimerItem, Room, User, UserRole } from "@/types";
+import { formatHours, minutesToHours } from "@/lib/time";
+import { addWeeks, formatDayHeading, formatWeekRange, weekStartOf, weekdayDates } from "@/lib/week";
+import type { ActiveTimerItem, Room, TimesheetEntryItem, User, UserRole, Weekday } from "@/types";
 
 const ROLE_OPTIONS: UserRole[] = [
   "admin",
@@ -131,6 +135,137 @@ function WorkloadTab({
           hasActiveTimer={activeTimerUserIds.has(detailer.id)}
         />
       ))}
+    </div>
+  );
+}
+
+/** Admin-only (Team Leader too — see canManageAdminSettings) timesheet: one
+ * row per detailer, one column per day, showing which project(s) they
+ * logged time against that day and for how long — powers the Team page's
+ * Timesheet tab (docs/ARCHITECTURE.md §28). Same week-nav pattern as the
+ * Planning page (lib/week.ts, the same admin-configurable
+ * planning_week_start_day setting), so the two grids line up on the same
+ * week boundaries. */
+function TimesheetTab({ detailers }: { detailers: User[] }) {
+  const [anchorWeekday, setAnchorWeekday] = React.useState<Weekday | null>(null);
+  const [weekStart, setWeekStart] = React.useState<string | null>(null);
+  const days = React.useMemo(() => (weekStart ? weekdayDates(weekStart) : []), [weekStart]);
+
+  const [entries, setEntries] = React.useState<TimesheetEntryItem[] | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    settingsApi
+      .get()
+      .then((settings) => {
+        setAnchorWeekday(settings.planning_week_start_day);
+        setWeekStart(weekStartOf(settings.planning_week_start_day));
+      })
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load settings."));
+  }, []);
+
+  React.useEffect(() => {
+    if (days.length === 0) return;
+    reportsApi
+      .timesheet(days[0], days[days.length - 1])
+      .then(setEntries)
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load the timesheet."));
+  }, [days]);
+
+  const entriesByCell = React.useMemo(() => {
+    const map = new Map<string, TimesheetEntryItem[]>();
+    for (const entry of entries ?? []) {
+      const key = `${entry.user_id}-${entry.date}`;
+      const list = map.get(key) ?? [];
+      list.push(entry);
+      map.set(key, list);
+    }
+    return map;
+  }, [entries]);
+
+  if (!weekStart || !anchorWeekday) {
+    return <p className="text-sm text-muted-foreground">Loading timesheet…</p>;
+  }
+
+  if (detailers.length === 0) {
+    return <p className="text-sm text-muted-foreground">No detailer accounts yet.</p>;
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => setWeekStart((w) => (w ? addWeeks(w, -1) : w))}
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </Button>
+        <span className="w-48 text-center text-sm font-medium">{formatWeekRange(weekStart)}</span>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => setWeekStart((w) => (w ? addWeeks(w, 1) : w))}
+        >
+          <ChevronRight className="h-4 w-4" />
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => setWeekStart(weekStartOf(anchorWeekday))}>
+          This week
+        </Button>
+      </div>
+
+      {error && <p className="text-sm text-danger">{error}</p>}
+
+      <Card>
+        <CardContent className="p-0">
+          {!entries ? (
+            <p className="px-4 py-6 text-sm text-muted-foreground">Loading…</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-40">Detailer</TableHead>
+                  {days.map((day) => (
+                    <TableHead key={day} className="min-w-48">
+                      {formatDayHeading(day)}
+                    </TableHead>
+                  ))}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {detailers.map((detailer) => (
+                  <TableRow key={detailer.id} className="align-top hover:bg-transparent">
+                    <TableCell className="whitespace-nowrap align-top text-sm font-medium">
+                      {detailer.full_name}
+                    </TableCell>
+                    {days.map((day) => {
+                      const cellEntries = entriesByCell.get(`${detailer.id}-${day}`) ?? [];
+                      return (
+                        <TableCell key={`${detailer.id}-${day}`} className="align-top">
+                          {cellEntries.length === 0 ? (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          ) : (
+                            <div className="flex flex-col gap-1">
+                              {cellEntries.map((entry) => (
+                                <div key={entry.project_id} className="text-xs">
+                                  <span className="font-medium">{entry.project_name}</span>
+                                  <span className="ml-1.5 text-muted-foreground">
+                                    {formatHours(minutesToHours(entry.logged_minutes))}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </TableCell>
+                      );
+                    })}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -243,7 +378,12 @@ function NewUserDialog({
 
 export default function TeamPage() {
   const { user: currentUser } = useAuth();
-  const isAdmin = currentUser?.role === "admin";
+  // lib/roles.ts::canManageAdminSettings mirrors backend/app/api/deps.py's
+  // _ROLES_WITH_ADMIN_BYPASS — Team Leader has the same blanket bypass as
+  // Admin there, so it needs the same access to the user-management
+  // controls below (add/role/active), otherwise it'd have the backend
+  // rights with no UI to use them.
+  const isAdmin = canManageAdminSettings(currentUser?.role);
 
   const [users, setUsers] = React.useState<User[] | null>(null);
   const [rooms, setRooms] = React.useState<Room[] | null>(null);
@@ -349,6 +489,7 @@ export default function TeamPage() {
         <TabsList>
           <TabsTrigger value="team">Team</TabsTrigger>
           <TabsTrigger value="workload">Workload</TabsTrigger>
+          {isAdmin && <TabsTrigger value="timesheet">Timesheet</TabsTrigger>}
         </TabsList>
 
         <TabsContent value="team">
@@ -450,6 +591,12 @@ export default function TeamPage() {
             />
           )}
         </TabsContent>
+
+        {isAdmin && (
+          <TabsContent value="timesheet">
+            <TimesheetTab detailers={detailers} />
+          </TabsContent>
+        )}
       </Tabs>
 
       <NewUserDialog

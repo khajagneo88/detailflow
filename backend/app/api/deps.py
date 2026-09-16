@@ -54,15 +54,27 @@ def get_current_user(
     return user
 
 
+# Roles that implicitly pass every role check, regardless of what a given
+# route actually asks for — i.e. full admin rights. Admin has always been
+# one; Team Leader was promoted to the same blanket bypass on explicit
+# request (previously Team Leader only had MANAGEMENT_ROLES-level access,
+# see the comment on MANAGEMENT_ROLES below — it stayed out of Nester-only
+# and Admin-only endpoints like user management). Keeping this as a tuple
+# rather than inlining the check means every route stays automatically
+# correct if this set changes again later.
+_ROLES_WITH_ADMIN_BYPASS = (UserRole.ADMIN, UserRole.TEAM_LEADER)
+
+
 def require_role(*allowed_roles: UserRole) -> Callable[[User], User]:
     """Usage: `current_user: User = Depends(require_role(UserRole.ADMIN, UserRole.TEAM_LEADER))`.
 
-    Admin implicitly passes every role check (spec §5: Admin "can perform
-    all team-leader functionality").
+    Admin (and, as of this bypass list, Team Leader) implicitly passes
+    every role check (spec §5: Admin "can perform all team-leader
+    functionality").
     """
 
     def dependency(current_user: User = Depends(get_current_user)) -> User:
-        if current_user.role == UserRole.ADMIN:
+        if current_user.role in _ROLES_WITH_ADMIN_BYPASS:
             return current_user
         if current_user.role not in allowed_roles:
             raise HTTPException(
@@ -74,17 +86,20 @@ def require_role(*allowed_roles: UserRole) -> Callable[[User], User]:
     return dependency
 
 
-# Manager sits above Team Leader (oversees multiple team leaders / projects)
-# but currently carries the same operational permissions — no project-level
-# visibility restriction exists yet for either role, so there's nothing to
-# differentiate beyond who *can* be assigned as a project's leader. Defined
-# here as a tuple so every route that means "team-leader-or-above" imports
-# one name instead of the pair drifting out of sync across route files.
+# Manager nominally sits above Team Leader (oversees multiple team leaders /
+# projects), though Team Leader now actually carries broader permissions
+# than Manager since it was added to _ROLES_WITH_ADMIN_BYPASS above — Manager
+# is still only ever checked against MANAGEMENT_ROLES-gated routes. No
+# project-level visibility restriction exists for either role, so there's
+# nothing to differentiate beyond who *can* be assigned as a project's
+# leader. Defined here as a tuple so every route that means
+# "team-leader-or-above" imports one name instead of the pair drifting out
+# of sync across route files.
 MANAGEMENT_ROLES = (UserRole.MANAGER, UserRole.TEAM_LEADER)
 
 # Batch creation and membership changes are explicitly Nester-only per
 # product spec (unlike the room stage-transition endpoint, which has always
 # been left open — see app/api/routes/batches.py for why that precedent is
-# followed for the batch *status* transitions but not here). Admin still
-# bypasses via require_role()'s own rule.
+# followed for the batch *status* transitions but not here). Admin and Team
+# Leader still bypass via require_role()'s own _ROLES_WITH_ADMIN_BYPASS rule.
 require_nester = require_role(UserRole.NESTER)

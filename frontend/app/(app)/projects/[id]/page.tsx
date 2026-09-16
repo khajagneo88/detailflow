@@ -16,6 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/features/auth/AuthContext";
 import { BatchesSection } from "@/features/batches/BatchesSection";
+import { StageTimelineTable } from "@/features/projects/StageTimelineTable";
 import { BulkAddRoomsDialog } from "@/features/projects/BulkAddRoomsDialog";
 import { projectsApi } from "@/features/projects/api";
 import { RoomTable } from "@/features/projects/RoomTable";
@@ -534,6 +535,7 @@ export default function ProjectDetailPage() {
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="rooms">Apartments &amp; Rooms</TabsTrigger>
+          <TabsTrigger value="stage-timeline">Stage Timeline</TabsTrigger>
           <TabsTrigger value="batches">Batches</TabsTrigger>
         </TabsList>
 
@@ -692,6 +694,10 @@ export default function ProjectDetailPage() {
               </Card>
             )}
           </div>
+        </TabsContent>
+
+        <TabsContent value="stage-timeline">
+          <StageTimelineTable projectId={project.id} />
         </TabsContent>
 
         <TabsContent value="batches">

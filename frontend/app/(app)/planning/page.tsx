@@ -16,6 +16,7 @@ import {
 import { useAuth } from "@/features/auth/AuthContext";
 import { planningApi } from "@/features/planning/api";
 import { TaskPickerDialog } from "@/features/planning/TaskPickerDialog";
+import { settingsApi } from "@/features/settings/api";
 import { usersApi } from "@/features/users/api";
 import { ApiError } from "@/lib/api-client";
 import {
@@ -27,8 +28,8 @@ import {
   weekCompletionTooltip,
 } from "@/lib/plan-colors";
 import { canManage } from "@/lib/roles";
-import { addWeeks, formatDayHeading, formatWeekRange, isPastWeek, mondayOf, weekdayDates } from "@/lib/week";
-import type { EligibleTasks, PlanEntry, User } from "@/types";
+import { addWeeks, formatDayHeading, formatWeekRange, isPastWeek, weekStartOf, weekdayDates } from "@/lib/week";
+import type { EligibleTasks, PlanEntry, User, Weekday } from "@/types";
 
 const PLANNABLE_ROLES = new Set(["detailer", "nester"]);
 
@@ -58,6 +59,7 @@ function PlanEntryChip({
   isDragging,
   weekStart,
   weekEnd,
+  anchorWeekday,
   onDragStart,
   onDragEnd,
   onRemove,
@@ -67,6 +69,7 @@ function PlanEntryChip({
   isDragging: boolean;
   weekStart: string;
   weekEnd: string;
+  anchorWeekday: Weekday;
   onDragStart: () => void;
   onDragEnd: () => void;
   onRemove: () => void;
@@ -79,8 +82,8 @@ function PlanEntryChip({
   const style = PLAN_CATEGORY_STYLES[category];
   const { primary, secondary } = entryLabel(entry);
 
-  const ring = weekCompletionRing(entry.task_completed_at, weekStart, weekEnd);
-  const completionTitle = weekCompletionTooltip(entry.task_completed_at, weekStart, weekEnd);
+  const ring = weekCompletionRing(entry.task_completed_at, weekStart, weekEnd, anchorWeekday);
+  const completionTitle = weekCompletionTooltip(entry.task_completed_at, weekStart, weekEnd, anchorWeekday);
   const ringClass =
     ring === "success" ? "ring-2 ring-success" : ring === "danger" ? "ring-2 ring-danger" : "";
 
@@ -142,20 +145,36 @@ export default function PlanningPage() {
   const { user } = useAuth();
   const canEdit = canManage(user?.role);
 
-  const [weekStart, setWeekStart] = React.useState(() => mondayOf());
-  const days = React.useMemo(() => weekdayDates(weekStart), [weekStart]);
-  // Last displayed day of the viewed week (Friday) — the grid only ever
-  // shows Mon-Fri (lib/week.ts::weekdayDates), so "the week" a task was
-  // assigned to means this Mon-Fri range, not Mon-Sun. Passed to every
-  // chip so the completion ring judges against the same range the grid
-  // itself is currently showing, rather than recomputing it per entry.
+  // Which day the grid's week starts on is an admin-configurable workspace
+  // setting (AppSettings.planning_week_start_day — see Settings), not a
+  // hardcoded constant, so the actual weekStart/days below only get
+  // computed once it's loaded (null = "don't know yet, don't guess").
+  const [anchorWeekday, setAnchorWeekday] = React.useState<Weekday | null>(null);
+  const [weekStart, setWeekStart] = React.useState<string | null>(null);
+  const days = React.useMemo(() => (weekStart ? weekdayDates(weekStart) : []), [weekStart]);
+  // Last displayed day of the viewed week — the grid only ever shows 5
+  // business days (lib/week.ts::weekdayDates), so "the week" a task was
+  // assigned to means that 5-day range, not the full 7-day calendar week.
+  // Passed to every chip so the completion ring judges against the same
+  // range the grid itself is currently showing, rather than recomputing it
+  // per entry.
   const weekEnd = days[4];
-  const weekIsOver = isPastWeek(weekStart);
+  const weekIsOver = weekStart && anchorWeekday ? isPastWeek(weekStart, anchorWeekday) : false;
 
   const [users, setUsers] = React.useState<User[] | null>(null);
   const [entries, setEntries] = React.useState<PlanEntry[] | null>(null);
   const [eligibleTasks, setEligibleTasks] = React.useState<EligibleTasks | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    settingsApi
+      .get()
+      .then((settings) => {
+        setAnchorWeekday(settings.planning_week_start_day);
+        setWeekStart(weekStartOf(settings.planning_week_start_day));
+      })
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load settings."));
+  }, []);
 
   const [pickerFor, setPickerFor] = React.useState<{ userId: number; date: string } | null>(null);
   const [draggingId, setDraggingId] = React.useState<number | null>(null);
@@ -183,6 +202,7 @@ export default function PlanningPage() {
   }, []);
 
   React.useEffect(() => {
+    if (days.length === 0) return; // settings haven't loaded yet — nothing to fetch
     planningApi
       .listEntries(days[0], days[4])
       .then(setEntries)
@@ -273,6 +293,10 @@ export default function PlanningPage() {
       : []
   );
 
+  if (!weekStart || !anchorWeekday) {
+    return <p className="px-1 py-6 text-sm text-muted-foreground">Loading…</p>;
+  }
+
   return (
     <div className="flex flex-col gap-6">
       <div>
@@ -286,14 +310,14 @@ export default function PlanningPage() {
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <Button size="sm" variant="outline" onClick={() => setWeekStart((w) => addWeeks(w, -1))}>
+          <Button size="sm" variant="outline" onClick={() => setWeekStart((w) => (w ? addWeeks(w, -1) : w))}>
             <ChevronLeft className="h-4 w-4" />
           </Button>
           <span className="w-48 text-center text-sm font-medium">{formatWeekRange(weekStart)}</span>
-          <Button size="sm" variant="outline" onClick={() => setWeekStart((w) => addWeeks(w, 1))}>
+          <Button size="sm" variant="outline" onClick={() => setWeekStart((w) => (w ? addWeeks(w, 1) : w))}>
             <ChevronRight className="h-4 w-4" />
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => setWeekStart(mondayOf())}>
+          <Button size="sm" variant="ghost" onClick={() => setWeekStart(weekStartOf(anchorWeekday))}>
             This week
           </Button>
         </div>
@@ -376,6 +400,7 @@ export default function PlanningPage() {
                                 isDragging={draggingId === entry.id}
                                 weekStart={weekStart}
                                 weekEnd={weekEnd}
+                                anchorWeekday={anchorWeekday}
                                 onDragStart={() => setDraggingId(entry.id)}
                                 onDragEnd={() => {
                                   setDraggingId(null);

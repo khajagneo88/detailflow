@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel
 
@@ -51,6 +51,23 @@ class TimeSummaryReport(BaseModel):
     rooms: list[RoomTimeSummaryItem]
     total_estimated_hours: float
     total_logged_hours: float
+
+
+class TimesheetEntryItem(BaseModel):
+    """One row per (detailer, calendar day, project) with at least one
+    logged time entry within the requested window — powers the Team page's
+    admin-only Timesheet tab (docs/ARCHITECTURE.md §28): what project a
+    detailer worked on, and how long, on a given day. A detailer/day with
+    nothing logged simply has no row, same "no row = nothing logged"
+    convention as WeeklyLoggedTimeItem/DetailerHoursItem above. A detailer
+    who split a day across two projects gets two rows, one per project."""
+
+    user_id: int
+    full_name: str
+    date: date
+    project_id: int
+    project_name: str
+    logged_minutes: int
 
 
 class DetailerHoursItem(BaseModel):

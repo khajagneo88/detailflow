@@ -6,6 +6,7 @@ import { AlertTriangle } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { StageBadge } from "@/components/ui/stage-badge";
 import { useAuth } from "@/features/auth/AuthContext";
 import { RoomActions } from "@/features/rooms/RoomActions";
 import { roomsApi, workflowStagesApi } from "@/features/rooms/api";
@@ -43,6 +44,7 @@ function RoomRow({
             <AlertTriangle className="h-3.5 w-3.5 text-danger" />
           )}
           {room.name}
+          <StageBadge room={room} />
         </Link>
         <p className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
           {room.project_name}

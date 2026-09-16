@@ -15,6 +15,7 @@ from app.api.routes import (
     users,
     workflow_stages,
 )
+from app.api.routes import settings as settings_routes
 from app.core.config import settings
 
 app = FastAPI(title="DetailFlow API", version="0.1.0")
@@ -39,6 +40,7 @@ app.include_router(workflow_stages.router, prefix="/api")
 app.include_router(reports.router, prefix="/api")
 app.include_router(planning.router, prefix="/api")
 app.include_router(notifications.router, prefix="/api")
+app.include_router(settings_routes.router, prefix="/api")
 
 
 @app.get("/api/health", tags=["health"])

@@ -12,6 +12,7 @@
  * app/globals.css next to this app's other colour tokens.
  */
 
+import type { Room, Weekday } from "@/types";
 import { isPastWeek } from "@/lib/week";
 
 export type PlanCategory = "new_project" | "ifa" | "ifc" | "bom" | "nesting" | "complete";
@@ -20,14 +21,17 @@ export type PlanCategory = "new_project" | "ifa" | "ifc" | "bom" | "nesting" | "
  * (app/models/workflow_stage.py::DEFAULT_WORKFLOW_STAGES) — generic on the
  * "ifa"/"ifc" key prefix rather than an explicit stage-by-stage map, so a
  * future stage inserted into either cycle (e.g. a Variation stage) is
- * automatically the right colour without this file needing an update. */
+ * automatically the right colour without this file needing an update.
+ * Since §24 simplified the stage list down to just the IFA/IFC cycle, every
+ * room starts life in ifa_drafted — the "new_project" fallback below is no
+ * longer reachable from a real room, but stays harmless/forward-compatible
+ * rather than being ripped out (still used by PLAN_CATEGORY_LEGEND_ORDER,
+ * and by a plan entry that isn't room- or batch-backed — see planning/
+ * page.tsx). */
 export function categorizeRoomStage(stageKey: string): PlanCategory {
   if (stageKey === "complete") return "complete";
   if (stageKey.startsWith("ifa")) return "ifa";
   if (stageKey.startsWith("ifc")) return "ifc";
-  // setup, modelling_3d, waiting_check_measure, final_detailing — the
-  // solitary modelling work before anything is reviewable (docs/
-  // ARCHITECTURE.md §11.2) — "starting a new project", no colour.
   return "new_project";
 }
 
@@ -38,6 +42,28 @@ export function categorizeBatchStatus(status: string): PlanCategory {
   if (status === "complete") return "complete";
   if (status === "nesting") return "nesting";
   return "bom"; // bom_pending, bom_review — and a safe default for anything else
+}
+
+/** A *room's* category for display next to its name (My Work, project room
+ * tables, the Team Workload tab, the room detail page — see
+ * components/ui/stage-badge.tsx) — distinct from categorizeRoomStage above
+ * in one way: once a room has joined a Batch and that batch hasn't finished
+ * yet, the room's own workflow stage is frozen at IFC Issued (see
+ * app/services/batch_service.py — a room only ever leaves IFC Issued when
+ * its batch reaches `complete`), so showing "IFC" forever would hide the
+ * BOM/Nesting work actually happening. Reads the Batch's own status instead
+ * whenever one applies; falls back to the room's own stage otherwise
+ * (unbatched, or the batch already completed and the room moved on).
+ *
+ * Takes just the two fields it needs (`Pick`, not the full `Room`) so a
+ * caller that doesn't have a complete Room object on hand — e.g. the Stage
+ * Timeline tab's `RoomStageTimelineItem` row (features/projects/
+ * StageTimelineTable.tsx) — can still use it without fabricating one. */
+export function roomCategory(room: Pick<Room, "workflow_stage" | "batch">): PlanCategory {
+  if (room.batch && room.batch.status !== "complete") {
+    return categorizeBatchStatus(room.batch.status);
+  }
+  return categorizeRoomStage(room.workflow_stage.key);
 }
 
 interface PlanCategoryStyle {
@@ -110,10 +136,12 @@ export const PLAN_CATEGORY_STYLES: Record<PlanCategory, PlanCategoryStyle> = {
  * The current or a future week's chips get no judgment yet — same
  * "nothing to judge yet" rule §19.3 and §22.4 already established.
  *
- * `weekEndIso` is the week's last displayed day (Friday — lib/week.ts::
- * weekdayDates only ever shows Mon-Fri, this being a 5-day shop, not a
- * 7-day one), so "within the assigned week" here means Monday through
- * Friday inclusive, not Monday through Sunday.
+ * `weekEndIso` is the week's last displayed day — lib/week.ts::weekdayDates
+ * only ever shows 5 business days, this being a 5-day shop, not a 7-day
+ * one, and which calendar day that lands on depends on the admin-
+ * configured `anchorWeekday` (AppSettings.planning_week_start_day), so
+ * "within the assigned week" here means whatever 5-day span the grid is
+ * currently showing, not the full Monday-through-Sunday calendar week.
  */
 export type WeekCompletionRing = "success" | "danger" | null;
 
@@ -136,9 +164,10 @@ function utcDateOnly(isoDatetime: string): string {
 export function weekCompletionRing(
   taskCompletedAt: string | null,
   weekStartIso: string,
-  weekEndIso: string
+  weekEndIso: string,
+  anchorWeekday: Weekday
 ): WeekCompletionRing {
-  if (!isPastWeek(weekStartIso)) return null;
+  if (!isPastWeek(weekStartIso, anchorWeekday)) return null;
   if (!taskCompletedAt) return "danger";
   const completedDate = utcDateOnly(taskCompletedAt);
   return completedDate >= weekStartIso && completedDate <= weekEndIso ? "success" : "danger";
@@ -152,9 +181,10 @@ export function weekCompletionRing(
 export function weekCompletionTooltip(
   taskCompletedAt: string | null,
   weekStartIso: string,
-  weekEndIso: string
+  weekEndIso: string,
+  anchorWeekday: Weekday
 ): string | undefined {
-  if (!isPastWeek(weekStartIso)) return undefined;
+  if (!isPastWeek(weekStartIso, anchorWeekday)) return undefined;
   if (!taskCompletedAt) return "Not completed during its assigned week";
 
   const completedDate = utcDateOnly(taskCompletedAt);

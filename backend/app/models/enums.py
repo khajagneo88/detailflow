@@ -16,6 +16,23 @@ class UserRole(str, enum.Enum):
     NESTER = "nester"
 
 
+class Weekday(str, enum.Enum):
+    """A day of the week, spelled out rather than stored as an integer, so
+    AppSettings.planning_week_start_day is self-documenting in the database
+    and over the API — no "is 0 Sunday or Monday" ambiguity to remember.
+    frontend/lib/week.ts maps these onto JS's Date.getDay() (0=Sunday) at
+    the one place that needs an actual index, everywhere else just passes
+    the string straight through."""
+
+    MONDAY = "monday"
+    TUESDAY = "tuesday"
+    WEDNESDAY = "wednesday"
+    THURSDAY = "thursday"
+    FRIDAY = "friday"
+    SATURDAY = "saturday"
+    SUNDAY = "sunday"
+
+
 class Priority(str, enum.Enum):
     LOW = "low"
     NORMAL = "normal"
