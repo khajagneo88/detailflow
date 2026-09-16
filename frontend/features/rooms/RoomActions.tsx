@@ -16,13 +16,18 @@ import type { Comment, CommentType, Room, RoomStageEvent, WorkflowStage } from "
 /** "Ready for Check" always means the same click (move to the next stage in
  * sequence), but what that click actually *is* depends on where the room
  * sits right now — leaving Drafted for the matching Internal Review stage
- * is a review submission worth naming explicitly (labelled "IFA/IFC
- * Complete," matching the "Start IFA/IFC" pairing below — §30); every other
- * forward move is a generic "next stage." Shared by My Work and the room
- * detail page so the label is never a lie about what's about to happen. */
+ * is a review submission worth naming explicitly; every other forward
+ * move is a generic "next stage." Shared by My Work and the room detail
+ * page so the label is never a lie about what's about to happen.
+ *
+ * §30 briefly relabelled this "IFA/IFC Complete" — corrected back per §32:
+ * that name belongs to the Team Leader's *approval* of the review this
+ * button only submits (see ReviewGateCard's "Mark IFA/IFC Complete" on the
+ * room detail page), not to the detailer's own submission click, which
+ * isn't "complete" at all yet — it's just been handed off for review. */
 function nextStageLabel(targetKey: string, targetName: string): string {
-  if (targetKey === "ifa_internal_review") return "IFA Complete";
-  if (targetKey === "ifc_internal_review") return "IFC Complete";
+  if (targetKey === "ifa_internal_review") return "Submit IFA Review";
+  if (targetKey === "ifc_internal_review") return "Submit IFC Review";
   return `Next Stage (${targetName})`;
 }
 

@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ArrowRight, CheckCircle2, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { ArrowRight, CheckCircle2, Pencil, RotateCcw, Trash2, Undo2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -58,20 +58,37 @@ import type {
 // app/api/routes/time_entries.py's _assert_can_modify.
 const MANAGEMENT_TIME_ROLES = new Set(["admin", "manager", "team_leader"]);
 
-// The one *required* decision point in the fixed stage list — a room here
-// forks based on what came back from the client. IFC Issued is deliberately
-// NOT a second required gate: client involvement after IFC is optional/rare
-// (see VariationLogger below) — see workflow_stage.py on the backend.
-// Every other transition is a plain forward (or manual) move.
-const DECISION_STAGE_KEY = "ifa_issued";
-
 // The one stage where a late, optional client change can be logged without
 // gating the normal forward transition to Complete — see workflow_stage.py's
 // DEFAULT_WORKFLOW_STAGES comment and VariationLogger below.
 const VARIATION_STAGE_KEY = "ifc_issued";
 
 const COMMENT_TYPES: CommentType[] = ["note", "rfi", "blocker", "variation"];
-const OUTCOMES: StageTransitionOutcome[] = ["approved", "approved_with_comments", "markups_required"];
+
+// The two checkpoints a Team Leader/Manager (management tier — see
+// _MANAGEMENT_ROLES in lib/room-workflow.ts) works: did the detailer's
+// draft actually pass internal review? Rendered as ReviewGateCard below —
+// two named buttons ("Mark IFA/IFC Complete" / "Send Back for Changes")
+// instead of a generic stage picker, per docs/ARCHITECTURE.md §32.
+const REVIEW_GATE_STAGE_KEYS = new Set(["ifa_internal_review", "ifc_internal_review"]);
+
+// The two checkpoints where what actually gets recorded is the *client's*
+// decision, not just a stage move — a Manager/Team Leader/Project Manager
+// job (_CLIENT_OUTCOME_ROLES). Rendered as ClientOutcomeCard below
+// ("Approved" / "Markups Required"), symmetric across both the IFA and IFC
+// cycles (§32) — ifc_issued getting the same treatment as ifa_issued is a
+// deliberate extension: the ifc_issued -> complete/ifc_revision rule §29
+// already added was reachable before this change, just without ever
+// showing the Outcome field for it.
+const CLIENT_OUTCOME_STAGE_KEYS = new Set(["ifa_issued", "ifc_issued"]);
+
+/** Which package a review-gate/client-outcome stage belongs to — every key
+ * in either Set above starts with "ifa" or "ifc", same plain-prefix check
+ * lib/room-workflow.ts::startLabel already uses for the detailer's own
+ * Start button. */
+function packageOf(stageKey: string): "IFA" | "IFC" {
+  return stageKey.startsWith("ifa") ? "IFA" : "IFC";
+}
 
 function StatRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -82,42 +99,267 @@ function StatRow({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-function StageTransitionCard({
+function EmptyStageCard({ room }: { room: Room }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm font-semibold text-foreground">Move stage</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="text-sm text-muted-foreground">
+          {room.workflow_stage.key === "complete"
+            ? "This room is complete — nothing left to move."
+            : "Nothing for you to do here right now — this room is with someone else at this stage."}
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+/** The Team Leader/Manager's internal-review gate — "did this pass?" with
+ * exactly two answers, each its own button, instead of a generic "pick a
+ * target stage" dropdown. Feedback is the same free-text note the backend
+ * has always accepted on any transition (RoomStageEvent.note) — just
+ * required here specifically when sending it back, since "changes
+ * needed" with no explanation isn't actionable for the detailer. */
+function ReviewGateCard({
   room,
-  stages,
-  role,
+  approveTarget,
+  sendBackTarget,
   onTransitioned,
 }: {
   room: Room;
-  stages: WorkflowStage[];
-  role: UserRole | undefined;
+  approveTarget: WorkflowStage | undefined;
+  sendBackTarget: WorkflowStage | undefined;
   onTransitioned: (room: Room, event: RoomStageEvent) => void;
 }) {
-  // Only the stages `role` is actually allowed to move this room to from
-  // its current stage (see lib/room-workflow.ts::allowedStageTransitions,
-  // mirroring the backend's own per-transition role rules) — not "every
-  // other stage in the pipeline" like this picker used to offer.
-  const otherStages = React.useMemo(
-    () => allowedStageTransitions(room, role, stages),
-    [room, role, stages]
+  const pkg = packageOf(room.workflow_stage.key);
+  const [note, setNote] = React.useState("");
+  const [error, setError] = React.useState<string | null>(null);
+  const [busy, setBusy] = React.useState<"approve" | "send_back" | null>(null);
+
+  async function run(action: "approve" | "send_back", target: WorkflowStage) {
+    setError(null);
+    setBusy(action);
+    try {
+      const event = await roomsApi.createStageTransition(room.id, {
+        to_stage_key: target.key,
+        outcome: null,
+        note: note || null,
+      });
+      const updatedRoom = await roomsApi.get(room.id);
+      onTransitioned(updatedRoom, event);
+      setNote("");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to move stage.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function handleSendBack() {
+    if (!sendBackTarget) return;
+    if (!note.trim()) {
+      setError("Add feedback for the detailer before sending this back.");
+      return;
+    }
+    void run("send_back", sendBackTarget);
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm font-semibold text-foreground">Internal Review</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="review-feedback">Feedback for the detailer</Label>
+          <Textarea
+            id="review-feedback"
+            rows={3}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder={`Any issues to flag? Required if you send this back — optional if you mark ${pkg} complete.`}
+          />
+        </div>
+
+        {error && <p className="rounded-md bg-danger-bg px-3 py-2 text-sm text-danger">{error}</p>}
+
+        <div className="flex flex-wrap items-center gap-2">
+          {approveTarget && (
+            <Button onClick={() => void run("approve", approveTarget)} disabled={busy !== null}>
+              <CheckCircle2 className="h-4 w-4" />
+              {busy === "approve" ? "Saving…" : `Mark ${pkg} Complete`}
+            </Button>
+          )}
+          {sendBackTarget && (
+            <Button
+              onClick={handleSendBack}
+              disabled={busy !== null}
+              variant="outline"
+              className="border-danger/40 text-danger hover:bg-danger-bg"
+            >
+              <Undo2 className="h-4 w-4" />
+              {busy === "send_back" ? "Saving…" : "Send Back for Changes"}
+            </Button>
+          )}
+        </div>
+      </CardContent>
+    </Card>
   );
+}
+
+/** The Manager/Team Leader/Project Manager's client-response gate — what
+ * actually came back from the client, recorded as a real
+ * StageTransitionOutcome (not just inferred from which stage was picked).
+ * "Approved" folds in an optional "with comments" checkbox rather than a
+ * three-way stage picker, since both outcomes move to the same target
+ * stage — only the outcome value recorded on the RoomStageEvent differs. */
+function ClientOutcomeCard({
+  room,
+  approveTarget,
+  markupsTarget,
+  onTransitioned,
+}: {
+  room: Room;
+  approveTarget: WorkflowStage | undefined;
+  markupsTarget: WorkflowStage | undefined;
+  onTransitioned: (room: Room, event: RoomStageEvent) => void;
+}) {
+  const pkg = packageOf(room.workflow_stage.key);
+  const [withComments, setWithComments] = React.useState(false);
+  const [note, setNote] = React.useState("");
+  const [error, setError] = React.useState<string | null>(null);
+  const [busy, setBusy] = React.useState<"approved" | "markups" | null>(null);
+
+  async function run(
+    action: "approved" | "markups",
+    target: WorkflowStage,
+    outcome: StageTransitionOutcome
+  ) {
+    setError(null);
+    setBusy(action);
+    try {
+      const event = await roomsApi.createStageTransition(room.id, {
+        to_stage_key: target.key,
+        outcome,
+        note: note || null,
+      });
+      const updatedRoom = await roomsApi.get(room.id);
+      onTransitioned(updatedRoom, event);
+      setNote("");
+      setWithComments(false);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to move stage.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function handleMarkups() {
+    if (!markupsTarget) return;
+    if (!note.trim()) {
+      setError("Add a note on what the client wants changed before recording markups.");
+      return;
+    }
+    void run("markups", markupsTarget, "markups_required");
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm font-semibold text-foreground">Client Response</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        <p className="text-sm text-muted-foreground">
+          What did the client say about this {pkg} package?
+        </p>
+
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="client-note">Notes</Label>
+          <Textarea
+            id="client-note"
+            rows={3}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Optional for Approved — required if recording Markups Required."
+          />
+        </div>
+
+        {approveTarget && (
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={withComments}
+              onChange={(e) => setWithComments(e.target.checked)}
+              className="h-4 w-4 rounded border-border"
+            />
+            {STAGE_OUTCOME_LABELS.approved_with_comments}
+          </label>
+        )}
+
+        {error && <p className="rounded-md bg-danger-bg px-3 py-2 text-sm text-danger">{error}</p>}
+
+        <div className="flex flex-wrap items-center gap-2">
+          {approveTarget && (
+            <Button
+              onClick={() =>
+                void run(
+                  "approved",
+                  approveTarget,
+                  withComments ? "approved_with_comments" : "approved"
+                )
+              }
+              disabled={busy !== null}
+            >
+              <CheckCircle2 className="h-4 w-4" />
+              {busy === "approved" ? "Saving…" : STAGE_OUTCOME_LABELS.approved}
+            </Button>
+          )}
+          {markupsTarget && (
+            <Button
+              onClick={handleMarkups}
+              disabled={busy !== null}
+              variant="outline"
+              className="border-danger/40 text-danger hover:bg-danger-bg"
+            >
+              <Undo2 className="h-4 w-4" />
+              {busy === "markups" ? "Saving…" : STAGE_OUTCOME_LABELS.markups_required}
+            </Button>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/** The fallback for anything that isn't one of the two named gates above —
+ * in practice only an admin-bypass role (Admin/Team Leader) manually
+ * working a Detailer-tier move (e.g. redrafting after a Revision) from a
+ * non-detailer account, since every real _MANAGEMENT/_CLIENT_OUTCOME
+ * transition is one of the two stage-key sets ReviewGateCard/
+ * ClientOutcomeCard already cover. Plain "pick a target, add a note"
+ * picker, same shape this whole card used to be before §32. */
+function GenericStageTransitionCard({
+  room,
+  otherStages,
+  onTransitioned,
+}: {
+  room: Room;
+  otherStages: WorkflowStage[];
+  onTransitioned: (room: Room, event: RoomStageEvent) => void;
+}) {
   const [toStageKey, setToStageKey] = React.useState(otherStages[0]?.key ?? "");
-  const [outcome, setOutcome] = React.useState<StageTransitionOutcome | "">("");
   const [note, setNote] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
 
-  // The picker's selection can go stale when the room's own stage changes
-  // (e.g. right after a successful move) — reset to whatever's newly
-  // available rather than submitting a target that's no longer offered.
   React.useEffect(() => {
     if (!otherStages.some((s) => s.key === toStageKey)) {
       setToStageKey(otherStages[0]?.key ?? "");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [otherStages]);
-
-  const isDecisionPoint = room.workflow_stage.key === DECISION_STAGE_KEY;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -127,35 +369,17 @@ function StageTransitionCard({
     try {
       const event = await roomsApi.createStageTransition(room.id, {
         to_stage_key: toStageKey,
-        outcome: outcome || null,
+        outcome: null,
         note: note || null,
       });
       const updatedRoom = await roomsApi.get(room.id);
       onTransitioned(updatedRoom, event);
       setNote("");
-      setOutcome("");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to move stage.");
     } finally {
       setIsSubmitting(false);
     }
-  }
-
-  if (otherStages.length === 0) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm font-semibold text-foreground">Move stage</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground">
-            {room.workflow_stage.key === "complete"
-              ? "This room is complete — nothing left to move."
-              : "Nothing for you to do here right now — this room is with someone else at this stage."}
-          </p>
-        </CardContent>
-      </Card>
-    );
   }
 
   return (
@@ -180,28 +404,6 @@ function StageTransitionCard({
             </Select>
           </div>
 
-          {isDecisionPoint && (
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="outcome">Outcome</Label>
-              <Select
-                id="outcome"
-                value={outcome}
-                onChange={(e) => setOutcome(e.target.value as StageTransitionOutcome)}
-              >
-                <option value="">No outcome recorded</option>
-                {OUTCOMES.map((o) => (
-                  <option key={o} value={o}>
-                    {STAGE_OUTCOME_LABELS[o]}
-                  </option>
-                ))}
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                IFA Issued is the client-approval checkpoint — record what came back before
-                moving on to IFC Drafted or IFA Revision.
-              </p>
-            </div>
-          )}
-
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="transition-note">Note</Label>
             <Textarea
@@ -225,6 +427,66 @@ function StageTransitionCard({
       </CardContent>
     </Card>
   );
+}
+
+/** Dispatches to the right "Move stage" presentation for the room's
+ * current stage — ReviewGateCard at the two internal-review checkpoints,
+ * ClientOutcomeCard at the two client-decision checkpoints, and the plain
+ * generic picker for anything else (see GenericStageTransitionCard's own
+ * docstring for when that actually happens). `otherStages` — the legal
+ * targets for `role` from here (lib/room-workflow.ts::allowedStageTransitions,
+ * mirroring the backend's own per-transition role rules) — is computed
+ * once here and handed down, so every branch agrees on what's actually
+ * allowed instead of re-deriving it. */
+function StageTransitionCard({
+  room,
+  stages,
+  role,
+  onTransitioned,
+}: {
+  room: Room;
+  stages: WorkflowStage[];
+  role: UserRole | undefined;
+  onTransitioned: (room: Room, event: RoomStageEvent) => void;
+}) {
+  const otherStages = React.useMemo(
+    () => allowedStageTransitions(room, role, stages),
+    [room, role, stages]
+  );
+
+  if (otherStages.length === 0) {
+    return <EmptyStageCard room={room} />;
+  }
+
+  const stageKey = room.workflow_stage.key;
+
+  if (REVIEW_GATE_STAGE_KEYS.has(stageKey)) {
+    const approveKey = stageKey === "ifa_internal_review" ? "ifa_issued" : "ifc_issued";
+    const sendBackKey = stageKey === "ifa_internal_review" ? "ifa_drafted" : "ifc_drafted";
+    return (
+      <ReviewGateCard
+        room={room}
+        approveTarget={otherStages.find((s) => s.key === approveKey)}
+        sendBackTarget={otherStages.find((s) => s.key === sendBackKey)}
+        onTransitioned={onTransitioned}
+      />
+    );
+  }
+
+  if (CLIENT_OUTCOME_STAGE_KEYS.has(stageKey)) {
+    const approveKey = stageKey === "ifa_issued" ? "ifc_drafted" : "complete";
+    const markupsKey = stageKey === "ifa_issued" ? "ifa_revision" : "ifc_revision";
+    return (
+      <ClientOutcomeCard
+        room={room}
+        approveTarget={otherStages.find((s) => s.key === approveKey)}
+        markupsTarget={otherStages.find((s) => s.key === markupsKey)}
+        onTransitioned={onTransitioned}
+      />
+    );
+  }
+
+  return <GenericStageTransitionCard room={room} otherStages={otherStages} onTransitioned={onTransitioned} />;
 }
 
 /** The detailer-facing alternative to StageTransitionCard — Start / On Hold
